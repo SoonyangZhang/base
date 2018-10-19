@@ -22,7 +22,7 @@ include_directories(${CMAKE_SOURCE_DIR}/rtc_base)
 include_directories(${CMAKE_SOURCE_DIR}/ns3log)
 include_directories(${CMAKE_SOURCE_DIR}/help)
 include_directories(${CMAKE_SOURCE_DIR}/video)
-include_directories(${CMAKE_SOURCE_DIR}/encoder)
+include_directories(${CMAKE_SOURCE_DIR}/endecoder)
 set(razor_FILES
 ${CMAKE_SOURCE_DIR}/bbr/bbr_bandwidth_sample.c  
 ${CMAKE_SOURCE_DIR}/bbr/bbr_loss_rate_filter.c  
@@ -94,7 +94,7 @@ add_subdirectory(rtc_base)
 add_subdirectory(ns3log)
 add_subdirectory(help)
 add_subdirectory(video)
-add_subdirectory(encoder)
+add_subdirectory(endecoder)
 set(EXECUTABLE_NAME "sim_sender")
 add_executable(${EXECUTABLE_NAME} ${CMAKE_SOURCE_DIR}/sim_test/sim_sender/sim_sender_test.cpp)
 target_link_libraries(${EXECUTABLE_NAME}  help razor rtc_base pthread)
@@ -119,10 +119,19 @@ include_directories(/usr/local/include)
 LINK_DIRECTORIES(/usr/local/lib)
 set(EXECUTABLE_NAME "t_encoder")
 add_executable(${EXECUTABLE_NAME} ${CMAKE_SOURCE_DIR}/video/encoder_test.cc)
-target_link_libraries(${EXECUTABLE_NAME} video echo_h264  ns3log rtc_base x264 avcodec avutil swscale pthread dl m)
+target_link_libraries(${EXECUTABLE_NAME} video h264endecoder  ns3log rtc_base x264 avcodec avutil swscale pthread dl m)
+
+include_directories(/usr/local/include)
+LINK_DIRECTORIES(/usr/local/lib)
+set(EXECUTABLE_NAME "t_endecoder")
+add_executable(${EXECUTABLE_NAME} ${CMAKE_SOURCE_DIR}/video/endecoder_test.cc)
+target_link_libraries(${EXECUTABLE_NAME} video h264endecoder  ns3log rtc_base x264 avcodec avutil swscale pthread dl m)
+
 
 set(EXECUTABLE_NAME "t_thread")
 add_executable(${EXECUTABLE_NAME} ${CMAKE_SOURCE_DIR}/video/main_test.cc)
 target_link_libraries(${EXECUTABLE_NAME}  rtc_base)
 
-
+set(EXECUTABLE_NAME "t_ffmpeg")
+add_executable(${EXECUTABLE_NAME} ${CMAKE_SOURCE_DIR}/endecoder/ffmpeg_test.cc)
+target_link_libraries(${EXECUTABLE_NAME} video h264endecoder  ns3log rtc_base x264 avcodec avutil swscale pthread dl m)

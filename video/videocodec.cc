@@ -68,7 +68,7 @@ void VideoEncoder::OnIncomingData(VideoFrame*frame){
 	{
 		rtc::CritScope cs(&frame_mutex_);
 		frame_buf_.push(f);
-		NS_LOG_INFO("encoder queue size"<<frame_buf_.size());
+		//NS_LOG_INFO("encoder queue size"<<frame_buf_.size());
 	}
 }
 void VideoEncoder::Run(){
@@ -98,6 +98,90 @@ void VideoEncoder::Run(){
 }
 void VideoEncoder::SetRate(uint32_t r){
 	encoder_->set_bitrate(r);
+}
+VideoDecoder::VideoDecoder(DecodedImageCallback& cb)
+:cb_(cb),handler_(0),width_(0),height_(0){
+	for(int i=0;i<10;i++){
+		VideoFrame *f=new VideoFrame();
+		free_buf_.push(f);
+	}
+	handler_=decoder_.X264Decoder_Init();
+	running_=true;
+	rtc::Thread::Start();
+}
+VideoDecoder::~VideoDecoder(){
+	if(running_){
+		running_=false;
+		rtc::Thread::Stop();
+	}
+	decoder_.X264Decoder_UnInit(handler_);
+    VideoFrame *f=NULL;
+	while(!free_buf_.empty()){
+		f=free_buf_.front();
+		free_buf_.pop();
+		delete f;
+	}
+	while(!frame_buf_.empty()){
+		f=frame_buf_.front();
+		frame_buf_.pop();
+		delete f;
+	}
+}
+void VideoDecoder::Stop(){
+	running_=false;
+	rtc::Thread::Stop();
+}
+void VideoDecoder::Init(uint32_t w,uint32_t h){
+	width_=w;
+	height_=h;
+	uint32_t len=width_*height_*3;
+	yuv_buf_.reset(new uint8_t [len]);
+}
+void VideoDecoder::OnIncomingData(VideoFrame* frame){
+	if(!running_){return;};
+	VideoFrame *f=NULL;
+	{
+		rtc::CritScope cs(&free_mutex_);
+		if(free_buf_.empty()){
+			f=new VideoFrame();
+		}else{
+			f=free_buf_.front();
+			free_buf_.pop();
+		}
+	}
+	f->fill_buf(frame->get_buf(),frame->size());
+	{
+		rtc::CritScope cs(&frame_mutex_);
+		frame_buf_.push(f);
+	}
+}
+void VideoDecoder::Run(){
+	while(running_){
+		VideoFrame *f=NULL;
+		{
+			rtc::CritScope cs(&frame_mutex_);
+			if(!frame_buf_.empty()){
+				f=frame_buf_.front();
+				frame_buf_.pop();
+			}
+		}
+		if(f){
+			int decode_size=0;
+			int width=0;
+			int height=0;
+			int ret=0;
+			ret=decoder_.X264Decoder_Decode(handler_,f->get_buf(),f->size(),yuv_buf_.get()
+					,&decode_size,&width,&height);
+			//NS_LOG_INFO("decode "<<width<<"x"<<height);
+			if(!ret){
+				cb_.OnDecodedImageCallback(yuv_buf_.get(),decode_size);
+			}
+			{
+				rtc::CritScope cs(&free_mutex_);
+				free_buf_.push(f);
+			}
+		}
+	}
 }
 }
 

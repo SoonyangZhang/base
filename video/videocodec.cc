@@ -114,7 +114,6 @@ VideoDecoder::~VideoDecoder(){
 		running_=false;
 		rtc::Thread::Stop();
 	}
-	decoder_.X264Decoder_UnInit(handler_);
     VideoFrame *f=NULL;
 	while(!free_buf_.empty()){
 		f=free_buf_.front();
@@ -130,6 +129,7 @@ VideoDecoder::~VideoDecoder(){
 void VideoDecoder::Stop(){
 	running_=false;
 	rtc::Thread::Stop();
+    decoder_.X264Decoder_UnInit(handler_);
 }
 void VideoDecoder::Init(uint32_t w,uint32_t h){
 	width_=w;

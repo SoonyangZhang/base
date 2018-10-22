@@ -46,6 +46,5 @@ int main(){
 	return 0;
 }
 
-//X264Decoder_UnInit  segment fault, did not figure out why.
 
 

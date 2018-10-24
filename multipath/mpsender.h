@@ -1,54 +1,54 @@
 #ifndef SIM_TRANSPORT_MPSENDER_H_
 #define SIM_TRANSPORT_MPSENDER_H_
-#include "razor_api.h"
-#include "sessioninterface.h"
 #include <vector>
 #include <map>
 #include <queue>
+#include "rtc_base/criticalsection.h"
+#include "razor_api.h"
+#include "sessioninterface.h"
+#include "schedule.h"
+
 namespace zsy{
-class SenderBuf{
-public:
-	SenderBuf(uint8_t p);
-	~SenderBuf();
-	bool put(sim_segment_t*seg);
-	sim_segment_t *get_segment(uint32_t);
-	uint32_t get_delay();
-	uint32_t get_len();
-private:
-	uint8_t pid_;
-	std::map<uint32_t,sim_segment_t*> buf_;
-	uint32_t len_;//byte
-};
-class MultipathSender{
+class MultipathSender:public SenderInterface{
 public:
 	MultipathSender(SessionInterface *session,uint32_t uid);
 	~MultipathSender();
 	void Drive();
-	void Connect(PathInfo p);
+	void Connect(su_socket *fd,su_addr *src,su_addr *dst);
 	void ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t*header,bin_stream_t *stream);
-	void SendVideo(int ftype,void *data,uint32_t len);
+	void SendVideo(uint8_t payload_type,int ftype,void *data,uint32_t size);
 	static void ChangeRate(void* trigger, uint32_t bitrate, uint8_t fraction_loss, uint32_t rtt);
 	static void PaceSend(void* handler, uint32_t packet_id, int retrans, size_t size, int padding);
+	PathInfo* GetPathInfo(uint8_t) override;
+	void PacketSchedule(uint32_t,uint8_t) override;
+	void SetSchedule(Schedule*);
+	int64_t GetFirstTs() override{return first_ts_;}
 private:
-	void SendConnect(PathInfo &p,uint32_t now);
-	void AddPath(uint8_t p);
-	std::vector<PathInfo> usable_paths_;
-	std::vector<PathInfo> syn_path_;
-	std::vector<PathInfo> dis_path_;
-	std::map<uint8_t,CongestionController*>controllers_;
+	void SendConnect(PathInfo *p,uint32_t now);
+	void AddController(PathInfo*);
+	void SchedulePendingBuf();
+	std::map<uint8_t,PathInfo*> usable_path_;
+	std::vector<PathInfo*> syn_path_;
+	std::vector<PathInfo*> dis_path_;
 	uint32_t uid_;
 	uint8_t pid_;
 	bin_stream_t	strm_;
 	SessionInterface *session_;
 	uint32_t frame_seed_;
-	// path->sement for rescheduling
+	uint32_t packet_seed_;
+	// path->segment for rescheduling
 	std::map<uint32_t,uint8_t> seg2path_;
-	std::map<uint8_t,SenderBuf*>path_buf_;
 	//get segment from path and put it to sent_buf_
-	//for retransmisson or waititng for delete;
+	//for retransmission or waitting for delete;
+	//as for path initial phase,may generate some padding packet;
 	std::map<uint32_t,sim_segment_t*> sent_buf_;
-	std::map<uint32_t,sim_segment_t*>send_buf_;
+	rtc::CriticalSection buf_mutex_;
+	std::map<uint32_t,sim_segment_t*>pending_buf_;
+	rtc::CriticalSection free_mutex_;
 	std::queue<sim_segment_t *>free_segs_;
+	uint32_t seg_c_;
+	int64_t first_ts_;
+	Schedule *scheduler_;
 };
 }
 

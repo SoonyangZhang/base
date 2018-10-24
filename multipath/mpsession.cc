@@ -39,8 +39,8 @@ MultipathSession::MultipathSession(int port,uint32_t uid)
 ,uid_(uid)
 ,sender_(NULL)
 ,receiver_(NULL)
-,running_{false},
-stop_{false}
+,running_{false}
+,stop_{false}
 ,notify_cb_{NULL}
 ,nitify_arg_{NULL}{
 	settings_t ipAddrs;
@@ -90,11 +90,10 @@ void MultipathSession::Connect(int num,...){
 	for(i=0;i<num_;i+=2){
 		for(auto it=fd2addr_.begin();it!=fd2addr_.end();it++){
 			if(memcmp(&addr_pair_[i],&(it->second),sizeof(su_addr))==0){
-				PathInfo path;
-				path.fd=it->first;
-				path.src=it->second;
-				path.dst=addr_pair_[i+1];
-				sender_->Connect(path);
+                su_socket fd=it->first;
+				su_addr src=it->second;
+                su_addr dst=addr_pair_[i+1];
+				sender_->Connect(&fd,&src,&dst);
 			}
 		}
 	}

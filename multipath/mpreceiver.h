@@ -2,6 +2,7 @@
 #define SIM_TRANSPORT_MPRECEIVER_H_
 #include <map>
 #include "sessioninterface.h"
+#include "path.h"
 namespace zsy{
 class MultipathReceiver{
 public:

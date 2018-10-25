@@ -13,15 +13,18 @@ class MultipathSession:public rtc::Thread,SessionInterface{
 public:
 	MultipathSession(int port,uint32_t uid);
 	~MultipathSession();
+	// at first create sender;
+	MultipathSender *CreateSender();
 	void Connect(int num,...);
 	void Start();
 	void Stop();
 	void Run() override;
-	void SendVideo(int ftype,void *data,uint32_t len);
+	void SendVideo(uint8_t payload_type,int ftype,void *data,uint32_t len);
 	bool Fd2Addr(su_socket fd,su_addr *addr) override;
 	void PathStateForward() override;
 private:
 	void ProcessingMsg(su_socket *fd,su_addr *remote,bin_stream_t *stream);
+	void ProcessPongMsg(uint8_t pid,uint32_t rtt);
 	int num_;
 	su_addr *addr_pair_;
 	uint32_t uid_; //odd value;
@@ -32,6 +35,7 @@ private:
 	MultipathReceiver *receiver_;
 	bool running_;
 	bool stop_;
+	bool recv_dis_;
 	sim_notify_fn notify_cb_;
 	void *nitify_arg_;
 };

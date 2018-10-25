@@ -13,9 +13,14 @@ MultipathSender::MultipathSender(SessionInterface *session,uint32_t uid)
 :uid_(uid),pid_(1)
 ,session_(session)
 ,frame_seed_(1)
-,packet_seed_(1)
+,schedule_seed_(1)
 ,seg_c_(0),first_ts_(-1)
-,scheduler_(NULL){
+,cc_type_(gcc_transport)
+,min_bitrate_(MIN_BITRATE)
+,start_bitrate_(START_BITRATE)
+,max_bitrate_(MAX_BITRATE)
+,scheduler_(NULL)
+,rate_control_(NULL){
 	bin_stream_init(&strm_);
 	for(int i=0;i<2;i++){
 		sim_segment_t *seg=new sim_segment_t();
@@ -41,8 +46,7 @@ MultipathSender::~MultipathSender(){
 	}
 NS_LOG_INFO("seg"<<std::to_string(seg_c_));
 }
-void MultipathSender::Drive(){
-   // NS_LOG_INFO("drive");
+void MultipathSender::Process(){
 	if(!syn_path_.empty()){
 		uint32_t now=rtc::TimeMillis();
 		for(auto it=syn_path_.begin();it!=syn_path_.end();){
@@ -90,7 +94,7 @@ void MultipathSender::SendConnect(PathInfo *p,uint32_t now){
 	//use cid to compute rtt
 	body.cid =now ;
 	body.token_size = 0;
-	body.cc_type =gcc_transport;
+	body.cc_type =cc_type_;
 	bin_stream_rewind(&strm_,1);
 	sim_encode_msg(&strm_,&header,&body);
     NS_LOG_INFO("send con size "<<strm_.used);
@@ -126,6 +130,9 @@ void MultipathSender::ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t*h
 	}
 	}
 }
+void MultipathSender::ProcessPongMsg(uint8_t pid,uint32_t rtt){
+
+}
 void MultipathSender::SchedulePendingBuf(){
 	std::map<uint32_t,uint32_t> pending_info;
 	{
@@ -151,7 +158,7 @@ void MultipathSender::SchedulePendingBuf(){
 }
 void MultipathSender::AddController(PathInfo *p){
 	razor_sender_t *sender;
-	int cc_type=gcc_congestion;
+	int cc_type=cc_type_;
 	int padding=1;
 	CongestionController *controller=new CongestionController(this,p->pid);
 	sender=razor_sender_create(cc_type,padding,
@@ -159,6 +166,7 @@ void MultipathSender::AddController(PathInfo *p){
 	(void*)controller,&MultipathSender::PaceSend,1000);
 	controller->SetCongestion((void*)sender,zsy::ROLE::ROLE_SENDER);
 	p->SetController(controller);
+	sender->set_bitrates(sender,min_bitrate_,start_bitrate_,max_bitrate_);
 }
 #define MAX_SPLIT_NUMBER	1024
 static uint16_t FrameSplit(uint16_t splits[], size_t size){
@@ -241,8 +249,9 @@ void MultipathSender::SendVideo(uint8_t payload_type,int ftype,void *data,uint32
 		while(!buf.empty()){
 				seg=buf.front();
 				buf.pop_front();
-				seg->packet_id = packet_seed_;
-				packet_seed_++;
+				seg->packet_id=0;
+				uint32_t schedule_id=schedule_seed_;
+				schedule_seed_++;
 				seg->fid = frame_seed_;
 				seg->timestamp = timestamp;
 				seg->ftype = ftype;
@@ -255,13 +264,18 @@ void MultipathSender::SendVideo(uint8_t payload_type,int ftype,void *data,uint32
 				seg->data_size = splits[i];
 				memcpy(seg->data, pos, seg->data_size);
 				pos += splits[i];
-				pending_buf_.insert(std::make_pair(seg->packet_id,seg));
+				pending_buf_.insert(std::make_pair(schedule_id,seg));
 			}
 	}
 	SchedulePendingBuf();
 }
 void MultipathSender::ChangeRate(void* trigger, uint32_t bitrate, uint8_t fraction_loss, uint32_t rtt){
-
+	CongestionController *controller=static_cast<CongestionController*>(trigger);
+	MultipathSender *mpsender=static_cast<MultipathSender*>(controller->session_);
+	uint8_t pid=controller->pid_;
+	if(mpsender->rate_control_){
+		mpsender->rate_control_->ChangeRate(pid,bitrate,fraction_loss,rtt);
+	}
 }
 void MultipathSender::PaceSend(void * handler, uint32_t packet_id, int retrans, size_t size, int padding){
 	CongestionController *controller=static_cast<CongestionController*>(handler);
@@ -275,23 +289,17 @@ void MultipathSender::PaceSend(void * handler, uint32_t packet_id, int retrans, 
 	sim_header_t header;
 	if(padding==1){
 	//TODO
-	NS_LOG_ERROR("send padding");
+	NS_LOG_ERROR("padding not implement for now");
 	}else{
 	sim_segment_t *seg=NULL;
-	seg=path->get_segment(packet_id);
-	{
-		auto it=mpsender->seg2path_.find(packet_id);
-		if(it!=mpsender->seg2path_.end()){
-			mpsender->seg2path_.erase(it);
-		}
-	}
+	seg=path->get_segment(packet_id,retrans);
 	if(seg){
 		seg->transport_seq=path->trans_seq;
 		path->trans_seq++;
 		seg->send_ts = (uint16_t)(now - mpsender->first_ts_ - seg->timestamp);
 		INIT_SIM_HEADER(header, SIM_SEG, mpsender->uid_);
+		header.ver=pid;
 		sim_encode_msg(&mpsender->strm_, &header, seg);
-		mpsender->sent_buf_.insert(std::make_pair(packet_id,seg));
 		if(cc){
 			cc->on_send(cc,seg->transport_seq, seg->data_size + SIM_SEGMENT_HEADER_SIZE);
 		}
@@ -309,11 +317,11 @@ PathInfo* MultipathSender::GetPathInfo(uint8_t pid){
 	return info;
 }
 //send packet id to path according to schedule;
-void MultipathSender::PacketSchedule(uint32_t packet,uint8_t pid){
+void MultipathSender::PacketSchedule(uint32_t schedule_id,uint8_t pid){
 	sim_segment_t *seg=NULL;
 	{
 		rtc::CritScope cs(&buf_mutex_);
-		auto it=pending_buf_.find(packet);
+		auto it=pending_buf_.find(schedule_id);
 		if(it!=pending_buf_.end()){
 			seg=it->second;
 			pending_buf_.erase(it);
@@ -324,8 +332,9 @@ void MultipathSender::PacketSchedule(uint32_t packet,uint8_t pid){
 		auto it=usable_path_.find(pid);
 		if(it!=usable_path_.end()){
 			path=it->second;
+			seg->packet_id=path->packet_seed_;
+			path->packet_seed_++;
 			path->put(seg);
-			seg2path_.insert(std::make_pair(seg->packet_id,pid));
 			razor_sender_t *cc=NULL;
 			cc=path->GetController()->s_cc_;
 			if(cc){
@@ -339,5 +348,13 @@ void MultipathSender::PacketSchedule(uint32_t packet,uint8_t pid){
 void  MultipathSender::SetSchedule(Schedule* s){
 	scheduler_=s;
 	scheduler_->SetSender(this);
+}
+void MultipathSender::SetRateController(RateControl * c){
+	rate_control_=c;
+	rate_control_->SetSender(this);
+}
+void MultipathSender::Reclaim(sim_segment_t *seg){
+	rtc::CritScope cs(&free_mutex_);
+	free_segs_.push(seg);
 }
 }

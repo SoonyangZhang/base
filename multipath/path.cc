@@ -9,6 +9,9 @@ PathInfo::PathInfo()
 ,rtt(0)
 ,rtt_update_ts(0)
 ,trans_seq(1)
+,packet_seed_(1)
+,rate(0)
+,base_seq_(0)
 ,len_(0),
 controller_(NULL){
 }
@@ -27,26 +30,34 @@ bool PathInfo::put(sim_segment_t*seg){
 	buf_.insert(std::make_pair(id,seg));
 	return true;
 }
-sim_segment_t *PathInfo::get_segment(uint32_t id){
+sim_segment_t *PathInfo::get_segment(uint32_t id,int retrans){
 	sim_segment_t *seg=NULL;
-	auto it=buf_.find(id);
-	if(it!=buf_.end()){
-		seg=it->second;
-		len_-=(seg->data_size+SIM_SEGMENT_HEADER_SIZE);
-		buf_.erase(it);
+	if(retrans==0){
+		auto it=buf_.find(id);
+		if(it!=buf_.end()){
+			seg=it->second;
+			len_-=(seg->data_size+SIM_SEGMENT_HEADER_SIZE);
+			buf_.erase(it);
+			sent_buf_.insert(std::make_pair(id,seg));
+		}
+	}else{
+		auto it=sent_buf_.find(id);
+		if(it!=sent_buf_.end()){
+			seg=it->second;
+		}
 	}
+
     return seg;
 }
 uint32_t PathInfo::get_delay(){
 	uint32_t delta=0;
 	if(buf_.empty()){
-		return delta;
 	}else{
 		uint32_t now=rtc::TimeMillis();
 		auto it=buf_.begin();
 		delta=now-it->second->timestamp;
-		return delta;
 	}
+	return delta;
 }
 uint32_t PathInfo::get_len(){
 	return len_;

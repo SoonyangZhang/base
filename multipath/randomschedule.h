@@ -2,6 +2,7 @@
 #define MULTIPATH_RANDOMSCHEDULE_H_
 #include <vector>
 #include "schedule.h"
+#include "random-variable-stream.h"
 namespace zsy{
 class RandomSchedule:public Schedule{
 public:
@@ -13,6 +14,7 @@ void RegisterPath(uint8_t) override;
 void UnregisterPath(uint8_t) override;
 private:
 	std::vector<uint8_t> pids_;
+	ns3::UniformRandomVariable uniform_;
 };
 }
 

@@ -9,5 +9,10 @@ enum PathState{
 	path_conned,
 	path_discon,
 };
+class NetworkDataCallback{
+public:
+	virtual ~NetworkDataCallback(){}
+	virtual void ForwardUp(uint32_t fid,uint8_t*data,uint32_t len,bool full)=0;
+};
 }
 #endif /* SIM_TRANSPORT_MPCOMMON_H_ */

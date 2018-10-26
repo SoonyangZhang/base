@@ -11,7 +11,8 @@ MultipathReceiver::MultipathReceiver(SessionInterface*session,uint32_t uid)
 ,min_bitrate_(MIN_BITRATE)
 ,max_bitrate_(MAX_BITRATE)
 ,session_(session)
-,seg_c_(0){
+,seg_c_(0)
+,deliver_(NULL){
 	bin_stream_init(&strm_);
 	for(int i=0;i<2;i++){
 		video_packet_t *v_packet=new video_packet_t();
@@ -40,11 +41,8 @@ void MultipathReceiver::ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t
 		uint32_t cid=body.cid;
 		uint8_t cc_type=body.cc_type;
 		uint8_t pid=header->ver;
-		PathInfo *path=NULL;
-		auto it=paths_.find(pid);
-		if(it!=paths_.end()){
-			path=it->second;
-		}else{
+		PathInfo *path=GetPath(pid);
+		if(!path){
 			path=new PathInfo();
 			path->pid=pid;
 			path->fd=*fd;
@@ -68,14 +66,10 @@ void MultipathReceiver::ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t
 	}
 	case SIM_PAD:{
 		uint8_t pid=header->ver;
-		PathInfo *path=NULL;
+		PathInfo *path=GetPath(pid);
 		sim_pad_t pad;
 		if (sim_decode_msg(stream, header, &pad) != 0)
 			return;
-		auto it=paths_.find(pid);
-		if(it!=paths_.end()){
-			path=it->second;
-		}
 		if(path){
 			razor_receiver_t *cc=NULL;
 			cc=path->GetController()->r_cc_;
@@ -87,15 +81,16 @@ void MultipathReceiver::ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t
 	}
 	}
 }
-#define MAX_WAITTING_RETRANS_TIME 500//500ms
-void MultipathReceiver::ProcessSegMsg(uint8_t pid,sim_segment_t*data){
+PathInfo *MultipathReceiver::GetPath(uint8_t pid){
 	PathInfo *path=NULL;
-	{
-		auto it=paths_.find(pid);
-		if(it!=paths_.end()){
-			path=it->second;
-		}
+	auto it=paths_.find(pid);
+	if(it!=paths_.end()){
+		path=it->second;
 	}
+	return path;
+}
+void MultipathReceiver::ProcessSegMsg(uint8_t pid,sim_segment_t*data){
+	PathInfo *path=GetPath(pid);
 	if(path==NULL){
 		return;
 	}
@@ -108,6 +103,89 @@ void MultipathReceiver::ProcessSegMsg(uint8_t pid,sim_segment_t*data){
 	path->OnReceiveSegment(data);
 	DeliverToCache(pid,data);
 
+}
+bool MultipathReceiver::DeliverFrame(video_frame_t *f){
+	bool ret=false;
+	uint32_t fid=f->fid;
+	bool full=false;
+	if(deliver_){
+		uint32_t size=0;
+		uint32_t buf_size=0;
+		uint32_t i=0;
+		video_packet_t *packet=NULL;
+		for(i=0;i<f->total;i++){
+		packet=f->packets[i];
+			if(packet){
+				buf_size+=packet->seg.data_size;
+			}
+		}
+		if(f->recv==f->total){
+			full=true;
+		}
+		uint8_t *buf=new uint8_t[buf_size];
+		uint32_t len=0;
+		uint8_t offset=0;
+		uint8_t *data;
+		for(i=0;i<f->total;i++){
+			packet=f->packets[i];
+			if(packet){
+				len=packet->seg.data_size;
+				data=(uint8_t*)(packet->seg.data);
+				memcpy(buf+offset,data,len);
+				offset+=len;
+			}
+		}
+		deliver_->ForwardUp(fid,buf,offset,full);
+		delete [] buf;
+		ret=true;
+	}
+	return ret;
+}
+void MultipathReceiver::FrameConsumed(video_frame_t *f){
+	video_packet_t *packet=NULL;
+	PathInfo *path=NULL;
+	uint8_t pid=0;
+	uint32_t packet_id=0;
+	uint32_t i=0;
+	for(i=0;i<f->total;i++){
+		packet=f->packets[i];
+		if(packet){
+			pid=packet->pid;
+			packet_id=packet->seg.packet_id;
+			path=GetPath(pid);
+			if(path){
+				path->Consume(packet_id);
+			}
+		}
+	}
+}
+void MultipathReceiver::BuffCollection(video_frame_t*f){
+	uint32_t i=0;
+	video_packet_t *packet=NULL;
+	for(i=0;i<f->total;i++){
+		packet=f->packets[i];
+		if(packet){
+			free_segs_.push(packet);
+			f->packets[i]=NULL;
+		}
+	}
+}
+void MultipathReceiver::CheckDeliverFrame(){
+	video_frame_t *frame=NULL;
+	uint8_t fid=0;
+	uint32_t now=rtc::TimeMillis();
+	for(auto it=frame_cache_.begin();it!=frame_cache_.end();){
+		frame=it->second;
+		if(frame->recv==frame->total){
+			DeliverFrame(frame);
+			FrameConsumed(frame);
+
+		}else if(frame->recv<frame->total){
+			if(frame->waitting_ts!=-1){
+
+			}
+		}
+	}
 }
 //true means not to deliver frame
 bool MultipathReceiver::CheckLateFrame(uint32_t fid){
@@ -123,6 +201,29 @@ bool MultipathReceiver::CheckLateFrame(uint32_t fid){
 	}
 	return ret;
 }
+//waitting or not waitting, the retransmission packet ,
+//that's a hard question.
+//waitting_ts=ts+max(path_i_waitting)
+//path_i_waitting=s_send_ts+rtt+rtt_var
+// fid=1,waitting=-1,must to get the full frame
+static uint32_t MAX_WAITTING_RETRANS_TIME=500;//500ms
+static uint32_t PROTECTION_TIME=50;//50ms caution, relate to pace buffer threshold
+uint32_t MultipathReceiver::GetWaittingDuration(){
+	uint32_t path_waitting=0;
+	uint32_t temp;
+	PathInfo *path=NULL;
+	for(auto it=paths_.begin();it!=paths_.end();it++){
+		path=it->second;
+		temp=path->rtt_+path->rtt_var_+path->s_sent_ts_;
+		if(temp>path_waitting){
+			path_waitting=temp;
+		}
+	}
+	path_waitting+=PROTECTION_TIME;
+	path_waitting=SU_MIN(path_waitting,MAX_WAITTING_RETRANS_TIME);
+	return path_waitting;
+}
+// implement the most simple way retransmission waititng time;
 void MultipathReceiver::DeliverToCache(uint8_t pid,sim_segment_t* d){
 	video_packet_t *packet=NULL;
 	uint32_t fid=d->fid;
@@ -144,6 +245,9 @@ void MultipathReceiver::DeliverToCache(uint8_t pid,sim_segment_t* d){
 			frame->total=total;
 			frame->waitting_ts=0;
 			frame->frame_type=ftype;
+			if(ftype==1){
+				frame->waitting_ts=-1;
+			}
 		}
 	}
 	if(!free_segs_.empty()){
@@ -162,6 +266,10 @@ void MultipathReceiver::DeliverToCache(uint8_t pid,sim_segment_t* d){
 	frame->recv++;
 	frame->packets[index]=packet;
 	frame_cache_.insert(std::make_pair(fid,frame));
+	if(frame->recv<frame->total&&frame->waitting_ts!=-1){
+		frame->waitting_ts=now+GetWaittingDuration();
+	}
+	CheckDeliverFrame();
 }
 void MultipathReceiver::ProcessPongMsg(uint8_t pid,uint32_t rtt){
 

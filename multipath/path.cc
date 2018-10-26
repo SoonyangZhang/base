@@ -6,12 +6,15 @@ PathInfo::PathInfo()
 ,state(path_ini)
 ,con_c{0}
 ,con_ts(0)
-,rtt(0)
-,rtt_update_ts(0)
-,trans_seq(1)
+,rtt_(0)
+,rtt_var_(5)
+,rtt_update_ts_(0)
+,trans_seq_(1)
 ,packet_seed_(1)
-,rate(0)
+,rate_(0)
 ,base_seq_(0)
+,s_sent_ts_(0)
+,max_seq_(0)
 ,len_(0),
 controller_(NULL){
 }
@@ -70,6 +73,23 @@ void PathInfo::SetController(CongestionController *c){
 }
 CongestionController* PathInfo::GetController(){
 	return controller_;
+}
+void PathInfo::ReceiverUpdateLoss(uint32_t seq,uint32_t ts){
+
+}
+void PathInfo::OnReceiveSegment(sim_segment_t *seg){
+	uint32_t seq=seg->packet_id;
+	if(max_seq_==0&&seg->packet_id>seg->index){
+		max_seq_=seg->packet_id-seg->index-1;
+		base_seq_ = seg->packet_id - seg->index - 1;
+	}
+
+	max_seq_=SU_MAX(max_seq_,seq);
+	if (seq == base_seq_ + 1)
+		base_seq_ = seq;
+}
+void PathInfo::Consume(uint32_t packet_id){
+
 }
 }
 

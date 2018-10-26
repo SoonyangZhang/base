@@ -115,8 +115,8 @@ void MultipathSender::ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t*h
             PathInfo *path=*it;
 			if(path->pid==pid){
 				path->state=path_conned;
-				path->rtt=rtt;
-				path->rtt_update_ts=now;
+				path->rtt_=rtt;
+				path->rtt_update_ts_=now;
 				syn_path_.erase(it);
 				AddController(path);
 				usable_path_.insert(std::make_pair(pid,path));
@@ -245,6 +245,7 @@ void MultipathSender::SendVideo(uint8_t payload_type,int ftype,void *data,uint32
 	}
 	NS_LOG_INFO("buf_size"<<std::to_string(buf.size()));
 	{
+		i=0;
 		rtc::CritScope cs(&buf_mutex_);
 		while(!buf.empty()){
 				seg=buf.front();
@@ -265,6 +266,7 @@ void MultipathSender::SendVideo(uint8_t payload_type,int ftype,void *data,uint32
 				memcpy(seg->data, pos, seg->data_size);
 				pos += splits[i];
 				pending_buf_.insert(std::make_pair(schedule_id,seg));
+				i++;
 			}
 	}
 	SchedulePendingBuf();
@@ -294,8 +296,8 @@ void MultipathSender::PaceSend(void * handler, uint32_t packet_id, int retrans, 
 	sim_segment_t *seg=NULL;
 	seg=path->get_segment(packet_id,retrans);
 	if(seg){
-		seg->transport_seq=path->trans_seq;
-		path->trans_seq++;
+		seg->transport_seq=path->trans_seq_;
+		path->trans_seq_++;
 		seg->send_ts = (uint16_t)(now - mpsender->first_ts_ - seg->timestamp);
 		INIT_SIM_HEADER(header, SIM_SEG, mpsender->uid_);
 		header.ver=pid;

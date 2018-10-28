@@ -49,6 +49,7 @@ NS_LOG_INFO("seg"<<std::to_string(seg_c_));
 }
 static uint32_t PING_INTERVAL=250;
 void MultipathSender::Process(){
+    if(stop_){return ;}
 	if(!syn_path_.empty()){
 		uint32_t now=rtc::TimeMillis();
 		for(auto it=syn_path_.begin();it!=syn_path_.end();){
@@ -164,6 +165,7 @@ void MultipathSender::SendConnect(PathInfo *p,uint32_t now){
 	su_udp_send(p->fd,&p->dst,strm_.data, strm_.used);
 }
 void MultipathSender::ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t*header,bin_stream_t *stream){
+    if(stop_){return ;}
 	uint8_t pid=header->ver;
 	switch(header->mid){
 	case SIM_CONNECT_ACK:{
@@ -211,6 +213,7 @@ void MultipathSender::ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t*h
 	}
 }
 void MultipathSender::ProcessPongMsg(uint8_t pid,uint32_t rtt){
+    if(stop_){return ;}
 	PathInfo *path=GetPathInfo(pid);
 	if(path){
 		path->UpdateRtt(rtt);
@@ -339,7 +342,7 @@ void MultipathSender::SendVideo(uint8_t payload_type,int ftype,void *data,uint32
 				}
 			}
 		}else{
-			for(j=0;j<total;i++){
+			for(j=0;j<total;j++){
 				seg=free_segs_.front();
 				free_segs_.pop();
 				buf.push_back(seg);
@@ -372,7 +375,8 @@ void MultipathSender::SendVideo(uint8_t payload_type,int ftype,void *data,uint32
 				i++;
 			}
 	}
-	SchedulePendingBuf();
+    frame_seed_++;
+	//SchedulePendingBuf();  pace queue is not thread safe, depress me quite a lot.
 }
 void MultipathSender::ChangeRate(void* trigger, uint32_t bitrate, uint8_t fraction_loss, uint32_t rtt){
 	CongestionController *controller=static_cast<CongestionController*>(trigger);

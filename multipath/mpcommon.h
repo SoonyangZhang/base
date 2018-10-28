@@ -38,7 +38,8 @@ public:
 };
 class SessionInterface{
 public:
-	~SessionInterface(){}
+	virtual ~SessionInterface(){}
+	virtual void SendVideo(uint8_t payload_type,int ftype,void *data,uint32_t len)=0;
 	virtual bool Fd2Addr(su_socket,su_addr *)=0;
 	virtual void PathStateForward(int type,int value)=0;
 };

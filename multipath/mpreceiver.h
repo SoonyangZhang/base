@@ -31,7 +31,7 @@ public:
 	void ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t*header,bin_stream_t *stream);
 	void ProcessPongMsg(uint8_t pid,uint32_t rtt);
 	static void SendFeedBack(void* handler, const uint8_t* payload, int payload_size);
-	void RegisterDataSink(NetworkDataConsumer* s){ deliver_=s;}
+	bool RegisterDataSink(NetworkDataConsumer* c);
 	void SendSegmentAck(uint8_t,sim_segment_ack_t *) override;
 private:
 	PathInfo *GetPath(uint8_t);

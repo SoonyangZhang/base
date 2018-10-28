@@ -10,10 +10,8 @@ public:
 class RateControl{
 public:
 	virtual ~RateControl(){}
-	void SetSender(SenderInterface* s){sender_=s;}
-	virtual void ChangeRate(uint8_t pid,uint32_t bitrate, uint8_t fraction_loss, uint32_t rtt);
-protected:
-	SenderInterface *sender_;
+	virtual void SetSender(SenderInterface* s)=0;
+	virtual void ChangeRate(uint8_t pid,uint32_t bitrate, uint8_t fraction_loss, uint32_t rtt)=0;
 };
 }
 

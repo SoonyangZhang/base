@@ -31,6 +31,14 @@ MultipathReceiver::~MultipathReceiver(){
 		delete v_packet;
 	}
 }
+bool MultipathReceiver::RegisterDataSink(NetworkDataConsumer* c){
+    bool ret=false;
+    if(!deliver_){
+    deliver_=c;
+    ret=true;
+    }
+    return ret;    
+}
 void MultipathReceiver::SendSegmentAck(uint8_t pid,sim_segment_ack_t *ack){
 	sim_header_t header;
 	INIT_SIM_HEADER(header, SIM_SEG_ACK, uid_);
@@ -42,7 +50,7 @@ void MultipathReceiver::SendSegmentAck(uint8_t pid,sim_segment_ack_t *ack){
 void MultipathReceiver::SendPingMsg(PathInfo*path,uint32_t now){
 	sim_header_t header;
 	sim_ping_t body;
-
+    //NS_LOG_INFO("PING");
 	INIT_SIM_HEADER(header, SIM_PING, uid_);
 	header.ver=path->pid;
 	body.ts = now;
@@ -53,6 +61,7 @@ void MultipathReceiver::SendPingMsg(PathInfo*path,uint32_t now){
 }
 void MultipathReceiver::ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t*header
 		,bin_stream_t *stream){
+    if(stop_){return ;}
 	switch (header->mid){
 	case SIM_CONNECT:
 	{
@@ -282,6 +291,7 @@ void MultipathReceiver::DeliverToCache(uint8_t pid,sim_segment_t* d){
 			frame=it->second;
 		}else{
 			frame=new video_frame_t();
+            frame->fid=fid;
 			frame->packets=(video_packet_t**)calloc(total,sizeof(sim_segment_t*));
 			frame->recv=0;
 			frame->total=total;
@@ -314,6 +324,7 @@ void MultipathReceiver::DeliverToCache(uint8_t pid,sim_segment_t* d){
 	CheckDeliverFrame();
 }
 void MultipathReceiver::ProcessPongMsg(uint8_t pid,uint32_t rtt){
+    if(stop_){return ;}
 	PathInfo *path=GetPath(pid);
 	path->UpdateRtt(rtt);
 	razor_receiver_t *cc=NULL;
@@ -359,6 +370,7 @@ void MultipathReceiver::SendFeedBack(void* handler, const uint8_t* payload, int 
 		return;
 	}
 	INIT_SIM_HEADER(header, SIM_FEEDBACK, receiver->uid_);
+    header.ver=pid;
 	feedback.base_packet_id =path->base_seq_;
 	feedback.feedback_size = payload_size;
 	memcpy(feedback.feedback, payload, payload_size);
@@ -367,6 +379,7 @@ void MultipathReceiver::SendFeedBack(void* handler, const uint8_t* payload, int 
 }
 static uint32_t PING_INTERVAL=250;
 void MultipathReceiver::Process(){
+    if(stop_){return ;}
 	uint32_t now=rtc::TimeMillis();
 	PathInfo *path=NULL;
 	for(auto it=paths_.begin();it!=paths_.end();it++){

@@ -82,9 +82,25 @@ void MultipathSession::RegisterCallback(sim_notify_fn notify,void *arg){
 	notify_cb_=notify;
 	notify_arg_=arg;
 }
-MultipathSender* MultipathSession::CreateSender(){
-	 sender_=new MultipathSender(this,uid_);
-	 return sender_;
+void MultipathSession::CreateSender(){
+	if(!sender_){
+		sender_=new MultipathSender(this,uid_);
+	}
+}
+void MultipathSession::RegisterRateControl(RateControl *rate){
+	CreateSender();
+	sender_->SetRateControl(rate);
+}
+void MultipathSession::RegistePacketSchedule(Schedule *schedule){
+	CreateSender();
+	sender_->SetSchedule(schedule);
+}
+bool MultipathSession::RegisterConsumer(NetworkDataConsumer*c){
+	bool ret=false;
+	if(receiver_){
+		ret=receiver_->RegisterDataSink(c);
+	}
+	return ret;
 }
 void MultipathSession::Connect(int num,...){
 	num_=num;
@@ -105,9 +121,10 @@ void MultipathSession::Connect(int num,...){
                 su_socket fd=it->first;
 				su_addr src=it->second;
                 su_addr dst=addr_pair_[i+1];
-                if(sender_){
-                	sender_->Connect(&fd,&src,&dst);
+                if(!sender_){
+                	CreateSender();
                 }
+                	sender_->Connect(&fd,&src,&dst);
 			}
 		}
 	}
@@ -125,16 +142,17 @@ void MultipathSession::SendDisconMsg(){
 			wait_time=path->rtt_+path->rtt_var_;
 			sender_->SendDisconnect(path,now);
 			send_dis_c_++;
+            sender_->Stop();
 			next_send_dis_ts_=now+send_dis_c_*wait_time;
 		}
 	}
 }
 void MultipathSession::StopSession(){
 	if(sender_){
-
+        sender_->Stop();
 	}
 	if(receiver_){
-
+        receiver_->Stop();
 	}
 }
 void MultipathSession::Start(){
@@ -290,6 +308,7 @@ void MultipathSession::ProcessingMsg(su_socket *fd,su_addr *remote,bin_stream_t 
 		ack.cid = body.cid;
 		ack.result = 0;
 		sim_encode_msg(stream, &h, &ack);
+        su_udp_send(*fd,remote,stream->data,stream->used);
 		if(notify_cb_){
 			notify_cb_(notify_arg_,NOTIFYMESSAGE::notify_dis,0);
 		}

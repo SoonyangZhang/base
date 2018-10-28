@@ -8,14 +8,18 @@
 #include "sessioninterface.h"
 #include "mpsender.h"
 #include "mpreceiver.h"
+#include "ratecontrol.h"
 namespace zsy{
-class MultipathSession:public rtc::Thread,SessionInterface{
+class MultipathSession:public rtc::Thread, public SessionInterface{
 public:
 	MultipathSession(int port,uint32_t uid);
 	~MultipathSession();
 	void RegisterCallback(sim_notify_fn notify,void *arg);
 	// at first create sender;
-	MultipathSender *CreateSender();
+	void CreateSender();
+	void RegisterRateControl(RateControl *rate);
+	void RegistePacketSchedule(Schedule *schedule);
+	bool RegisterConsumer(NetworkDataConsumer*c);
 	void Connect(int num,...);
 	void Disconnect();
 	void Start();
@@ -24,11 +28,11 @@ public:
 	void SendVideo(uint8_t payload_type,int ftype,void *data,uint32_t len);
 	bool Fd2Addr(su_socket fd,su_addr *addr) override;
 	void PathStateForward(int type,int value) override;
+	void StopSession();
 private:
 	void ProcessingMsg(su_socket *fd,su_addr *remote,bin_stream_t *stream);
 	void ProcessPongMsg(uint8_t pid,uint32_t rtt);
 	void SendDisconMsg();
-	void StopSession();
 	int num_;
 	su_addr *addr_pair_;
 	uint32_t uid_; //odd value;

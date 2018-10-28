@@ -43,8 +43,11 @@ MultipathSession::MultipathSession(int port,uint32_t uid)
 ,running_{false}
 ,stop_{false}
 ,recv_dis_{false}
+,send_dis_{false}
+,next_send_dis_ts_{0}
+,send_dis_c_{0}
 ,notify_cb_{NULL}
-,nitify_arg_{NULL}{
+,notify_arg_{NULL}{
 	settings_t ipAddrs;
 	loadLocalIp(ipAddrs);
 	for(auto it=ipAddrs.begin();it!=ipAddrs.end();it++){
@@ -74,6 +77,10 @@ MultipathSession::~MultipathSession(){
 	if(receiver_){
 		delete receiver_;
 	}
+}
+void MultipathSession::RegisterCallback(sim_notify_fn notify,void *arg){
+	notify_cb_=notify;
+	notify_arg_=arg;
 }
 MultipathSender* MultipathSession::CreateSender(){
 	 sender_=new MultipathSender(this,uid_);
@@ -105,6 +112,31 @@ void MultipathSession::Connect(int num,...){
 		}
 	}
 }
+void MultipathSession::Disconnect(){
+	send_dis_=true;
+	SendDisconMsg();
+}
+void MultipathSession::SendDisconMsg(){
+	uint32_t now=rtc::TimeMillis();
+	uint32_t wait_time=0;
+	if(sender_){
+		PathInfo *path=sender_->GetMinRttPath();
+		if(path){
+			wait_time=path->rtt_+path->rtt_var_;
+			sender_->SendDisconnect(path,now);
+			send_dis_c_++;
+			next_send_dis_ts_=now+send_dis_c_*wait_time;
+		}
+	}
+}
+void MultipathSession::StopSession(){
+	if(sender_){
+
+	}
+	if(receiver_){
+
+	}
+}
 void MultipathSession::Start(){
 	if(!running_){
 		running_=true;
@@ -122,7 +154,22 @@ void MultipathSession::Run(){
 	bin_stream_init(&rstrm);
 	bin_stream_resize(&rstrm, 1500);
 	while(running_){
-		if(!fds_.empty()){
+		if(send_dis_){
+			if(!recv_dis_){
+				uint32_t now=rtc::TimeMillis();
+				if(now>next_send_dis_ts_){
+					SendDisconMsg();
+				}
+				if(send_dis_c_>3){
+					recv_dis_=true;
+					if(notify_cb_){
+						notify_cb_(notify_arg_,NOTIFYMESSAGE::notify_dis,0);
+					}
+					StopSession();
+				}
+			}
+		}
+		if(!fds_.empty()&&!recv_dis_){
 			if(sender_){
 				sender_->Process();
 			}
@@ -184,19 +231,18 @@ void MultipathSession::ProcessingMsg(su_socket *fd,su_addr *remote,bin_stream_t 
         break;
 	}
 	case SIM_PONG:{
-		sim_header_t h;
 		sim_pong_t pong;
 		sim_decode_msg(stream, &header, &pong);
 		uint32_t rtt=rtc::TimeMillis();
 		ProcessPongMsg(pid,rtt);
         break;
 	}
-	//only sender can send ping
 	case SIM_PING:{
 		sim_header_t h;
 		sim_ping_t ping;
 		sim_decode_msg(stream, &header, &ping);
 		INIT_SIM_HEADER(h, SIM_PONG, uid_);
+        h.ver=pid;
 		sim_encode_msg(stream, &h, &ping);
 		su_udp_send(*fd,remote,stream->data,stream->used);
         break;
@@ -231,7 +277,33 @@ void MultipathSession::ProcessingMsg(su_socket *fd,su_addr *remote,bin_stream_t 
 		}
 		break;
 	}
-	//TODO dis dis_ack,
+	case SIM_DISCONNECT:{
+		recv_dis_=true;
+		sim_header_t h;
+		sim_disconnect_t body;
+		sim_disconnect_ack_t ack;
+
+		if(sim_decode_msg(stream, &header, &body) != 0)
+		return;
+		INIT_SIM_HEADER(h, SIM_DISCONNECT_ACK, uid_);
+		h.ver=pid;
+		ack.cid = body.cid;
+		ack.result = 0;
+		sim_encode_msg(stream, &h, &ack);
+		if(notify_cb_){
+			notify_cb_(notify_arg_,NOTIFYMESSAGE::notify_dis,0);
+		}
+		StopSession();
+		break;
+	}
+	case SIM_DISCONNECT_ACK:{
+		recv_dis_=true;
+		if(notify_cb_){
+			notify_cb_(notify_arg_,NOTIFYMESSAGE::notify_dis_ack,0);
+		}
+		StopSession();
+		break;
+	}
     default :{
     NS_LOG_INFO("msg error");
     break;
@@ -239,22 +311,20 @@ void MultipathSession::ProcessingMsg(su_socket *fd,su_addr *remote,bin_stream_t 
 	}
 }
 void MultipathSession::ProcessPongMsg(uint8_t pid,uint32_t rtt){
-	uint32_t keep_rtt=5;
-	if(rtt>keep_rtt){
-		keep_rtt=rtt;
-	}
 	if(sender_){
-		sender_->ProcessPongMsg(pid,keep_rtt);
+		sender_->ProcessPongMsg(pid,rtt);
 	}
 	if(receiver_){
-		receiver_->ProcessPongMsg(pid,keep_rtt);
+		receiver_->ProcessPongMsg(pid,rtt);
 	}
 }
-void MultipathSession::PathStateForward(){
-
+void MultipathSession::PathStateForward(int type,int value){
+	if(notify_cb_){
+		notify_cb_(notify_arg_,type,value);
+	}
 }
 void MultipathSession::SendVideo(uint8_t payload_type,int ftype,void *data,uint32_t len){
-	if(!recv_dis_){
+	if(!recv_dis_&&!send_dis_){
 		if(sender_){
 			sender_->SendVideo(payload_type,ftype,data,len);
 		}

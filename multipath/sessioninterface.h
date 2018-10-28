@@ -2,12 +2,6 @@
 #define SIM_TRANSPORT_SESSIONINTERFACE_H_
 #include "mpcommon.h"
 namespace zsy{
-class SessionInterface{
-public:
-	~SessionInterface(){}
-	virtual bool Fd2Addr(su_socket,su_addr *)=0;
-	virtual void PathStateForward()=0;
-};
 enum ROLE{
 	ROLE_SENDER,
 	ROLE_RECEIVER,

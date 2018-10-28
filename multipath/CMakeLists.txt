@@ -1,4 +1,6 @@
 set(multipath_FILES
+aggregaterate.cc
+fakevideogenerator.cc
 mincostschedule.cc
 mpsession.cc
 mpsender.cc

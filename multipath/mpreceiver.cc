@@ -12,7 +12,8 @@ MultipathReceiver::MultipathReceiver(SessionInterface*session,uint32_t uid)
 ,max_bitrate_(MAX_BITRATE)
 ,session_(session)
 ,seg_c_(0)
-,deliver_(NULL){
+,deliver_(NULL),
+stop_(false){
 	bin_stream_init(&strm_);
 	for(int i=0;i<2;i++){
 		video_packet_t *v_packet=new video_packet_t();
@@ -29,6 +30,26 @@ MultipathReceiver::~MultipathReceiver(){
 		seg_c_--;
 		delete v_packet;
 	}
+}
+void MultipathReceiver::SendSegmentAck(uint8_t pid,sim_segment_ack_t *ack){
+	sim_header_t header;
+	INIT_SIM_HEADER(header, SIM_SEG_ACK, uid_);
+	header.ver=pid;
+	sim_encode_msg(&strm_, &header, ack);
+	PathInfo *path=GetPath(pid);
+	su_udp_send(path->fd,&path->dst,strm_.data,strm_.used);
+}
+void MultipathReceiver::SendPingMsg(PathInfo*path,uint32_t now){
+	sim_header_t header;
+	sim_ping_t body;
+
+	INIT_SIM_HEADER(header, SIM_PING, uid_);
+	header.ver=path->pid;
+	body.ts = now;
+	sim_encode_msg(&strm_, &header, &body);
+	path->rtt_update_ts_=now;
+	path->ping_resend_++;
+	su_udp_send(path->fd,&path->dst,strm_.data, strm_.used);
 }
 void MultipathReceiver::ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t*header
 		,bin_stream_t *stream){
@@ -48,9 +69,11 @@ void MultipathReceiver::ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t
 			path->fd=*fd;
 			path->dst=*remote;
 			path->state=path_conned;
+			path->RegisterReceiverInterface(this);
 			session_->Fd2Addr(*fd,&path->src);
             paths_.insert(std::make_pair(pid,path));
-			ConfigureController(path,cc_type);		
+			ConfigureController(path,cc_type);
+			session_->PathStateForward(NOTIFYMESSAGE::notify_con,pid);
 		}
 		SendConnectAck(path,cid);
         break;
@@ -89,7 +112,16 @@ PathInfo *MultipathReceiver::GetPath(uint8_t pid){
 	}
 	return path;
 }
+razor_receiver_t* MultipathReceiver::GetRazorCC(uint32_t pid){
+	razor_receiver_t *cc=NULL;
+	PathInfo *path=GetPath(pid);
+	if(path){
+		cc=path->GetController()->r_cc_;
+	}
+	return cc;
+}
 void MultipathReceiver::ProcessSegMsg(uint8_t pid,sim_segment_t*data){
+	if(stop_){return;}
 	PathInfo *path=GetPath(pid);
 	if(path==NULL){
 		return;
@@ -107,7 +139,6 @@ void MultipathReceiver::ProcessSegMsg(uint8_t pid,sim_segment_t*data){
 bool MultipathReceiver::DeliverFrame(video_frame_t *f){
 	bool ret=false;
 	uint32_t fid=f->fid;
-	bool full=false;
 	if(deliver_){
 		uint32_t size=0;
 		uint32_t buf_size=0;
@@ -118,9 +149,6 @@ bool MultipathReceiver::DeliverFrame(video_frame_t *f){
 			if(packet){
 				buf_size+=packet->seg.data_size;
 			}
-		}
-		if(f->recv==f->total){
-			full=true;
 		}
 		uint8_t *buf=new uint8_t[buf_size];
 		uint32_t len=0;
@@ -135,7 +163,7 @@ bool MultipathReceiver::DeliverFrame(video_frame_t *f){
 				offset+=len;
 			}
 		}
-		deliver_->ForwardUp(fid,buf,offset,full);
+		deliver_->ForwardUp(fid,buf,offset,f->recv,f->total);
 		delete [] buf;
 		ret=true;
 	}
@@ -172,18 +200,32 @@ void MultipathReceiver::BuffCollection(video_frame_t*f){
 }
 void MultipathReceiver::CheckDeliverFrame(){
 	video_frame_t *frame=NULL;
-	uint8_t fid=0;
+	video_frame_t *waitting_for_delete=NULL;
 	uint32_t now=rtc::TimeMillis();
 	for(auto it=frame_cache_.begin();it!=frame_cache_.end();){
 		frame=it->second;
+		waitting_for_delete=NULL;
 		if(frame->recv==frame->total){
 			DeliverFrame(frame);
 			FrameConsumed(frame);
-
+			waitting_for_delete=frame;
 		}else if(frame->recv<frame->total){
 			if(frame->waitting_ts!=-1){
+				if(now>frame->waitting_ts){
+					DeliverFrame(frame);
+					FrameConsumed(frame);
+					waitting_for_delete=frame;
+				}
+			}else{
 
 			}
+		}
+		if(waitting_for_delete){
+			frame_cache_.erase(it++);
+			BuffCollection(waitting_for_delete);
+			delete waitting_for_delete;
+		}else{
+			break;
 		}
 	}
 }
@@ -272,7 +314,13 @@ void MultipathReceiver::DeliverToCache(uint8_t pid,sim_segment_t* d){
 	CheckDeliverFrame();
 }
 void MultipathReceiver::ProcessPongMsg(uint8_t pid,uint32_t rtt){
-
+	PathInfo *path=GetPath(pid);
+	path->UpdateRtt(rtt);
+	razor_receiver_t *cc=NULL;
+	cc=path->GetController()->r_cc_;
+	if(cc){
+		cc->update_rtt(cc,path->rtt_+path->rtt_var_);
+	}
 }
 void MultipathReceiver::SendConnectAck(PathInfo *path,uint32_t cid){
     char ip_port[128]={0};
@@ -300,17 +348,14 @@ void MultipathReceiver::SendFeedBack(void* handler, const uint8_t* payload, int 
 	CongestionController *control=static_cast<CongestionController*>(handler);
 	MultipathReceiver *receiver=static_cast<MultipathReceiver*>(control->session_);
 	uint8_t pid=control->pid_;
-	PathInfo *path=NULL;
-	auto it=receiver->paths_.find(pid);
-	if(it==receiver->paths_.end()){
-		NS_LOG_ERROR("path not foud");
-		return;
-	}
-	path=it->second;
+	PathInfo *path=receiver->GetPath(pid);
 	sim_header_t header;
 	sim_feedback_t feedback;
 	if (payload_size > SIM_FEEDBACK_SIZE){
 		NS_LOG_ERROR("feedback size > SIM_FEEDBACK_SIZE");
+		return;
+	}
+	if(!path){
 		return;
 	}
 	INIT_SIM_HEADER(header, SIM_FEEDBACK, receiver->uid_);
@@ -320,7 +365,25 @@ void MultipathReceiver::SendFeedBack(void* handler, const uint8_t* payload, int 
 	sim_encode_msg(&receiver->strm_, &header, &feedback);
 	su_udp_send(path->fd,&path->dst,receiver->strm_.data,receiver->strm_.used);
 }
+static uint32_t PING_INTERVAL=250;
 void MultipathReceiver::Process(){
+	uint32_t now=rtc::TimeMillis();
+	PathInfo *path=NULL;
+	for(auto it=paths_.begin();it!=paths_.end();it++){
+		path=it->second;
+		path->ReceiverHeartBeat(now);
+		if((now-path->rtt_update_ts_)>PING_INTERVAL){
+			SendPingMsg(path,now);
+		}
+	}
 
+}
+void MultipathReceiver::Stop(){
+	PathInfo *path=NULL;
+	stop_=true;
+	for(auto it=paths_.begin();it!=paths_.end();it++){
+		path=it->second;
+		path->ReceiverStop();
+	}
 }
 }

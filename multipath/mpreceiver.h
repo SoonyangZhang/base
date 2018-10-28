@@ -21,17 +21,21 @@ struct video_frame_t{
 	int frame_type;
 	video_packet_t **packets;
 };
-class MultipathReceiver{
+class MultipathReceiver :public ReceiverInterface{
 public:
 	MultipathReceiver(SessionInterface*session,uint32_t uid);
 	~MultipathReceiver();
 	void Process();
+	void Stop();
+	void SendPingMsg(PathInfo*path,uint32_t now);
 	void ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t*header,bin_stream_t *stream);
 	void ProcessPongMsg(uint8_t pid,uint32_t rtt);
 	static void SendFeedBack(void* handler, const uint8_t* payload, int payload_size);
-	void RegisterDataSink(NetworkDataCallback* s){ deliver_=s;}
+	void RegisterDataSink(NetworkDataConsumer* s){ deliver_=s;}
+	void SendSegmentAck(uint8_t,sim_segment_ack_t *) override;
 private:
 	PathInfo *GetPath(uint8_t);
+	razor_receiver_t* GetRazorCC(uint32_t pid);
 	void ProcessSegMsg(uint8_t,sim_segment_t*);
 	void SendConnectAck(PathInfo *path,uint32_t cid);
 	void ConfigureController(PathInfo *path,uint8_t transport_type);
@@ -52,7 +56,8 @@ private:
 	std::map<uint8_t,PathInfo*> paths_;
 	bin_stream_t	strm_;
 	std::map<uint32_t,video_frame_t*> frame_cache_;
-	NetworkDataCallback *deliver_;
+	NetworkDataConsumer *deliver_;
+	bool stop_;
 };
 }
 #endif /* SIM_TRANSPORT_MPRECEIVER_H_ */

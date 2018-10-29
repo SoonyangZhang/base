@@ -76,6 +76,8 @@ uint32_t ack_ts_;
 private:
 void UpdataRecvTable(uint32_t seq);
 void RecvTableRemoveUntil(uint32_t seq);
+uint32_t GetMinRecvSeq();
+uint32_t GetLossTableSize();
 std::map<uint32_t,sim_segment_t*> buf_;
 std::list<send_buf_t*> sent_buf_;
 std::set<uint32_t> loss_;

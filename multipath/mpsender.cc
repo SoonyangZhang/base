@@ -446,6 +446,7 @@ void MultipathSender::SetRateControl(RateControl * c){
 }
 void MultipathSender::Reclaim(sim_segment_t *seg){
 	rtc::CritScope cs(&free_mutex_);
+    memset(seg,0,sizeof(sim_segment_t));
 	free_segs_.push(seg);
 }
 }

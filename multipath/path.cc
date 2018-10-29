@@ -390,7 +390,7 @@ void PathInfo::LossTableRemove(uint32_t seq){
 void PathInfo::LossTableRemoveUntil(uint32_t seq){
 	for(auto it=loss_.begin();it!=loss_.end();){
 		uint32_t key=*it;
-		if(key<seq){
+		if(key<=seq){
 			loss_.erase(it++);
 		}else{
 			break;
@@ -403,7 +403,7 @@ void PathInfo::UpdataLoss(uint32_t seq){
 	for(i=max_seq_+1;i<seq;i++){
 		bool exist=LossTableSeqExist(i);
 		if(!exist){
-            printf("l %d\t%d\n",pid,i);
+            //printf("l %d\t%d\n",pid,i);
 			loss_.insert(i);
 		}
 	}
@@ -418,12 +418,33 @@ void PathInfo::UpdataSendTs(uint32_t ts){
 		s_sent_ts_=(smooth_num*s_sent_ts_+(smooth_den-smooth_num)*ts)/smooth_den;
 	}
 }
+uint32_t PathInfo::GetMinRecvSeq(){
+    uint32_t seq=0;
+    if(!recv_table_.empty()){
+    auto it=recv_table_.begin();
+    seq=(*it);
+    }
+return seq;
+}
+uint32_t PathInfo::GetLossTableSize(){
+    uint32_t len=loss_.size();
+    return len;
+}
 void PathInfo::UpdataRecvTable(uint32_t seq){
 	if(seq==base_seq_+1){
 		base_seq_=seq;
 	}else{
 		recv_table_.insert(seq);
 	}
+	while(!recv_table_.empty()){
+		auto it=recv_table_.begin();
+		uint32_t key=(*it);
+		if(key<=base_seq_){
+			recv_table_.erase(it);
+		}else{
+			break;
+		}
+	}    
 	while(!recv_table_.empty()){
 		auto it=recv_table_.begin();
 		uint32_t key=(*it);
@@ -439,7 +460,7 @@ void PathInfo::RecvTableRemoveUntil(uint32_t seq){
 	if(base_seq_<=seq){
 		base_seq_=seq;
 	}
-    printf("r %d\t%d\n",base_seq_,seq);
+    //printf("r %d\t%d\n",base_seq_,seq);
 	while(!recv_table_.empty()){
 		auto it=recv_table_.begin();
 		uint32_t key=(*it);
@@ -470,16 +491,19 @@ void PathInfo::OnReceiveSegment(sim_segment_t *seg){
 	if(max_seq_==0&&seg->packet_id>seg->index){
 		max_seq_=seg->packet_id-seg->index-1;
 		base_seq_ = seg->packet_id - seg->index - 1;
-	}
-	if(mpreceiver_){
-		mpreceiver_->DeliverToCache(pid,seg);
-	}    
+	}  
 	UpdataSendTs(seg->send_ts);
 	UpdataLoss(seq);
 	max_seq_=SU_MAX(max_seq_,seq);
 	UpdataRecvTable(seq);
 	VideoRealAck(0,seq);
-    printf("%d\t%d\t%d\t%d\t%d\n",pid,seq,base_seq_,max_seq_,seg->ftype);
+	if(mpreceiver_){
+		mpreceiver_->DeliverToCache(pid,seg);
+	} 
+    uint32_t min_seq=GetMinRecvSeq();
+    uint32_t loss_size=GetLossTableSize();
+    uint32_t delay=seg->send_ts; 
+    printf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",pid,seg->fid,seq,base_seq_,max_seq_,seg->ftype,min_seq,loss_size,delay);
 }
 // do not wait
 void PathInfo::Consume(uint32_t packet_id){

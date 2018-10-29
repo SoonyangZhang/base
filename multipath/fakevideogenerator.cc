@@ -33,6 +33,7 @@ void FakeVideoGenerator::ChangeRate(uint32_t bitrate){
 void FakeVideoGenerator::RegisterSession(SessionInterface *s){
 	session_=s;
 }
+#include<stdio.h>
 void FakeVideoGenerator::SendFrame(uint32_t now){
 	last_send_ts_=now;
 	uint32_t f_type=0;
@@ -42,6 +43,8 @@ void FakeVideoGenerator::SendFrame(uint32_t now){
 	}
 	frame_id_++;
 	len=delta_*rate_/(1000*8);
+    uint32_t packet_size=len/1000;
+    printf("packet_size %d\t%d\n",frame_id_-1,packet_size);
 	if(session_){
 		uint8_t *buf=new uint8_t[len];
 		session_->SendVideo(0,f_type,buf,len);

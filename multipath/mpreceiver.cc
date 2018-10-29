@@ -297,13 +297,15 @@ void MultipathReceiver::DeliverToCache(uint8_t pid,sim_segment_t* d){
 		}
 	}
     if(frame->packets[index]!=0){
-        printf("fatal error\n");
+        uint32_t oldseq=frame->packets[index]->seg.packet_id;
+        uint8_t oldpid=frame->packets[index]->pid;
+        printf("fatal error %d %d %d %d \n",oldpid,pid,oldseq,d->packet_id);
         return;
     }    
 	if(!free_segs_.empty()){
 		packet=free_segs_.front();
 		free_segs_.pop();
-        memset(&packet,0,sizeof(packet));
+        memset(packet,0,sizeof(video_packet_t));
 	}else{
 		packet=new video_packet_t();
 		seg_c_++;

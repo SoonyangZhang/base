@@ -49,7 +49,9 @@ static void notify_callback(void* event, int type, uint32_t val)
 }
 int main(){
     LogComponentEnable("MultipathReceiver", LOG_LEVEL_ALL);
-    LogComponentEnable("FakeVideoConsumer", LOG_LEVEL_ALL);
+    LogComponentEnable("PathInfo", LOG_LEVEL_ALL);
+    //LogComponentEnable("MultipathSession", LOG_LEVEL_ALL);
+    //LogComponentEnable("FakeVideoConsumer", LOG_LEVEL_ALL);
     //LogComponentEnable("MultipathSession", LOG_LEVEL_ALL);
 	signal(SIGTERM, signal_exit_handler);
 	signal(SIGINT, signal_exit_handler);

@@ -3,6 +3,7 @@
 #include <map>
 #include <vector>
 #include "rtc_base/thread.h"
+#include "rtc_base/criticalsection.h"
 #include "cf_stream.h"
 #include "sim_external.h"
 #include "sessioninterface.h"
@@ -10,6 +11,13 @@
 #include "mpreceiver.h"
 #include "ratecontrol.h"
 namespace zsy{
+enum MessageType{
+	message_send_dis,
+};
+struct SessionMessage{
+    uint32_t type;
+    uint32_t value;
+};
 class MultipathSession:public rtc::Thread, public SessionInterface{
 public:
 	MultipathSession(int port,uint32_t uid);
@@ -21,15 +29,17 @@ public:
 	void RegistePacketSchedule(Schedule *schedule);
 	bool RegisterConsumer(NetworkDataConsumer*c);
 	void Connect(int num,...);
-	void Disconnect();
 	void Start();
 	void Stop();
 	void Run() override;
 	void SendVideo(uint8_t payload_type,int ftype,void *data,uint32_t len);
 	bool Fd2Addr(su_socket fd,su_addr *addr) override;
 	void PathStateForward(int type,int value) override;
-	void StopSession();
+	void PostMessage(SessionMessage&msg);
 private:
+	void HandleMessage();
+	void Disconnect();
+    void StopSession();
 	void ProcessingMsg(su_socket *fd,su_addr *remote,bin_stream_t *stream);
 	void ProcessPongMsg(uint8_t pid,uint32_t rtt);
 	void SendDisconMsg();
@@ -39,6 +49,8 @@ private:
 	std::map<uint8_t,su_socket> p2fd_;
 	std::vector<su_socket>  fds_;
 	std::map<su_socket,su_addr> fd2addr_;
+    rtc::CriticalSection message_lock_;
+    std::list<SessionMessage> message_;
 	MultipathSender *sender_;
 	MultipathReceiver *receiver_;
 	bool running_;

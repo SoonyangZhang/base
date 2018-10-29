@@ -55,8 +55,9 @@ static void notify_callback(void* event, int type, uint32_t val)
 #define START_SEND_BITRATE (140 * 8 * 1000)
 int main(){
     LogComponentEnable("MultipathSender", LOG_LEVEL_ALL);
-    LogComponentEnable("MultipathSession", LOG_LEVEL_ALL);
-    LogComponentEnable("FakeVideoGenerator", LOG_LEVEL_ALL);
+    LogComponentEnable("PathInfo", LOG_LEVEL_ALL);
+    //LogComponentEnable("MultipathSession", LOG_LEVEL_ALL);
+    //LogComponentEnable("FakeVideoGenerator", LOG_LEVEL_ALL);
 	signal(SIGTERM, signal_exit_handler);
 	signal(SIGINT, signal_exit_handler);
 	signal(SIGTSTP, signal_exit_handler);
@@ -70,13 +71,15 @@ int main(){
     session.RegistePacketSchedule(&schedule);
     session.RegisterRateControl(&rate);
     session.RegisterCallback(notify_callback,NULL);
-    su_addr local;
-    su_addr remote;
-    su_set_addr(&local,"10.0.0.1",1234);
-    su_set_addr(&remote,"10.0.4.2",4321);
+    su_addr local1;
+    su_addr remote1;
+    su_addr local2;
     su_addr remote2;
-    su_set_addr(&remote2,"192.168.148.136",4321);
-    session.Connect(4,local,remote,local,remote2);
+    su_set_addr(&local1,"10.0.1.1",1234);
+    su_set_addr(&remote1,"10.0.2.2",4321);
+    su_set_addr(&local2,"10.0.3.1",1234);
+    su_set_addr(&remote2,"10.0.4.2",4321);
+    session.Connect(4,local1,remote1,local2,remote2);
     session.Start();
     uint32_t stop=rtc::TimeMillis()+run_time;
     bool can_send_video=false;
@@ -110,7 +113,9 @@ int main(){
 		}
     	if((now>stop)&&!send_dis_con){
             printf("send discon\n");
-    		session.Disconnect();
+            SessionMessage s_msg;
+            s_msg.type=MessageType::message_send_dis;
+    		session.PostMessage(s_msg);
     		generator.Stop();
     		send_dis_con=true;
     	}

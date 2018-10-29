@@ -23,7 +23,9 @@ public:
 	static void ChangeRate(void* trigger, uint32_t bitrate, uint8_t fraction_loss, uint32_t rtt);
 	static void PaceSend(void* handler, uint32_t packet_id, int retrans, size_t size, int padding);
 	PathInfo* GetPathInfo(uint8_t) override;
+	uint32_t GetUid() override{return uid_;}
 	PathInfo *GetMinRttPath();
+    void AddAvailablePath(PathInfo*path);
 	void PacketSchedule(uint32_t,uint8_t) override;
 	void SetSchedule(Schedule*);
 	void SetRateControl(RateControl *);

@@ -39,14 +39,6 @@ bool MultipathReceiver::RegisterDataSink(NetworkDataConsumer* c){
     }
     return ret;    
 }
-void MultipathReceiver::SendSegmentAck(uint8_t pid,sim_segment_ack_t *ack){
-	sim_header_t header;
-	INIT_SIM_HEADER(header, SIM_SEG_ACK, uid_);
-	header.ver=pid;
-	sim_encode_msg(&strm_, &header, ack);
-	PathInfo *path=GetPath(pid);
-	su_udp_send(path->fd,&path->dst,strm_.data,strm_.used);
-}
 void MultipathReceiver::SendPingMsg(PathInfo*path,uint32_t now){
 	sim_header_t header;
 	sim_ping_t body;
@@ -57,7 +49,7 @@ void MultipathReceiver::SendPingMsg(PathInfo*path,uint32_t now){
 	sim_encode_msg(&strm_, &header, &body);
 	path->rtt_update_ts_=now;
 	path->ping_resend_++;
-	su_udp_send(path->fd,&path->dst,strm_.data, strm_.used);
+	path->SendToNetwork(strm_.data, strm_.used);
 }
 void MultipathReceiver::ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t*header
 		,bin_stream_t *stream){
@@ -142,7 +134,8 @@ void MultipathReceiver::ProcessSegMsg(uint8_t pid,sim_segment_t*data){
 				data->data_size + SIM_SEGMENT_HEADER_SIZE, data->remb);
 	}
 	path->OnReceiveSegment(data);
-	DeliverToCache(pid,data);
+    //for retransmission packet ,memory leak, ooo...shit.
+	//DeliverToCache(pid,data);
 
 }
 bool MultipathReceiver::DeliverFrame(video_frame_t *f){
@@ -274,6 +267,7 @@ uint32_t MultipathReceiver::GetWaittingDuration(){
 	path_waitting=SU_MIN(path_waitting,MAX_WAITTING_RETRANS_TIME);
 	return path_waitting;
 }
+#include<stdio.h>
 // implement the most simple way retransmission waititng time;
 void MultipathReceiver::DeliverToCache(uint8_t pid,sim_segment_t* d){
 	video_packet_t *packet=NULL;
@@ -302,9 +296,14 @@ void MultipathReceiver::DeliverToCache(uint8_t pid,sim_segment_t* d){
 			}
 		}
 	}
+    if(frame->packets[index]!=0){
+        printf("fatal error\n");
+        return;
+    }    
 	if(!free_segs_.empty()){
 		packet=free_segs_.front();
 		free_segs_.pop();
+        memset(&packet,0,sizeof(packet));
 	}else{
 		packet=new video_packet_t();
 		seg_c_++;
@@ -344,38 +343,21 @@ void MultipathReceiver::SendConnectAck(PathInfo *path,uint32_t cid){
 	ack.cid = cid;
 	ack.result = 0;
 	sim_encode_msg(&strm_, &h, &ack);
-	su_udp_send(path->fd,&path->dst,strm_.data,strm_.used);
+	path->SendToNetwork(strm_.data,strm_.used);
 }
 void MultipathReceiver::ConfigureController(PathInfo *path,uint8_t transport_type){
 	razor_receiver_t *cc=NULL;
 	CongestionController *control=new CongestionController(this,path->pid);
 	uint8_t cc_type=(transport_type==bbr_transport)?bbr_congestion:gcc_congestion;
-	cc=razor_receiver_create(cc_type,min_bitrate_,max_bitrate_,SIM_SEGMENT_HEADER_SIZE,(void*)control,
+	cc=razor_receiver_create(cc_type,min_bitrate_,max_bitrate_,SIM_SEGMENT_HEADER_SIZE,(void*)path,
 			&MultipathReceiver::SendFeedBack);
 	control->SetCongestion(cc,ROLE::ROLE_RECEIVER);
     path->SetController(control);
 }
 void MultipathReceiver::SendFeedBack(void* handler, const uint8_t* payload, int payload_size){
-	CongestionController *control=static_cast<CongestionController*>(handler);
-	MultipathReceiver *receiver=static_cast<MultipathReceiver*>(control->session_);
-	uint8_t pid=control->pid_;
-	PathInfo *path=receiver->GetPath(pid);
-	sim_header_t header;
-	sim_feedback_t feedback;
-	if (payload_size > SIM_FEEDBACK_SIZE){
-		NS_LOG_ERROR("feedback size > SIM_FEEDBACK_SIZE");
-		return;
-	}
-	if(!path){
-		return;
-	}
-	INIT_SIM_HEADER(header, SIM_FEEDBACK, receiver->uid_);
-    header.ver=pid;
-	feedback.base_packet_id =path->base_seq_;
-	feedback.feedback_size = payload_size;
-	memcpy(feedback.feedback, payload, payload_size);
-	sim_encode_msg(&receiver->strm_, &header, &feedback);
-	su_udp_send(path->fd,&path->dst,receiver->strm_.data,receiver->strm_.used);
+	PathInfo *path=static_cast<PathInfo*>(handler);
+	path->SendFeedback(payload,payload_size);
+
 }
 static uint32_t PING_INTERVAL=250;
 void MultipathReceiver::Process(){

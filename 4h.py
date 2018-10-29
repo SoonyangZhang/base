@@ -6,9 +6,9 @@ from mininet.link import TCLink
 import time
 ##https://serverfault.com/questions/417885/configure-gateway-for-two-nics-through-static-routeing
 #    ____h2____
-#   /          \
+#   /          \ 2.2
 # h1           h3
-#   \___h4_____/
+#   \___h4_____/4.2
 #  
 net = Mininet( cleanup=True )
 h1 = net.addHost('h1',ip='10.0.1.1')

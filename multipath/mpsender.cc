@@ -117,7 +117,7 @@ void MultipathSender::SendPingMsg(PathInfo *path,uint32_t now){
 	//not update, ping_resend_ could be exploited to detect path out
 	path->rtt_update_ts_=now;
 	path->ping_resend_++;
-	su_udp_send(path->fd,&path->dst,strm_.data, strm_.used);
+	path->SendToNetwork(strm_.data, strm_.used);
 }
 PathInfo* MultipathSender::GetMinRttPath(){
 	PathInfo *path=NULL;
@@ -146,15 +146,15 @@ void MultipathSender::SendDisconnect(PathInfo*path,uint32_t ts){
 	header.ver=path->pid;
 	body.cid = ts;
 	sim_encode_msg(&strm_, &header, &body);
-	su_udp_send(path->fd,&path->dst,strm_.data, strm_.used);
+	path->SendToNetwork(strm_.data, strm_.used);
 }
-void MultipathSender::SendConnect(PathInfo *p,uint32_t now){
+void MultipathSender::SendConnect(PathInfo *path,uint32_t now){
     NS_LOG_INFO("send con");
 	sim_header_t header;
 	sim_connect_t body;
 	INIT_SIM_HEADER(header, SIM_CONNECT,uid_);
 	//use protocol var to mark path id
-	header.ver=p->pid;
+	header.ver=path->pid;
 	//use cid to compute rtt
 	body.cid =now ;
 	body.token_size = 0;
@@ -162,7 +162,7 @@ void MultipathSender::SendConnect(PathInfo *p,uint32_t now){
 	bin_stream_rewind(&strm_,1);
 	sim_encode_msg(&strm_,&header,&body);
     NS_LOG_INFO("send con size "<<strm_.used);
-	su_udp_send(p->fd,&p->dst,strm_.data, strm_.used);
+	path->SendToNetwork(strm_.data, strm_.used);
 }
 void MultipathSender::ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t*header,bin_stream_t *stream){
     if(stop_){return ;}
@@ -176,23 +176,21 @@ void MultipathSender::ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t*h
         uint32_t now=rtc::TimeMillis();
         uint32_t rtt=now-ack.cid;
 		//TODO cid can be use to updata rtt
-		for(auto it=syn_path_.begin();it!=syn_path_.end();it++){
+		for(auto it=syn_path_.begin();it!=syn_path_.end();){
             PathInfo *path=*it;
 			if(path->pid==pid){
 				path->state=path_conned;
 				path->rtt_=rtt;
 				path->min_rtt_=rtt;
 				path->rtt_update_ts_=now;
-				syn_path_.erase(it);
-				AddController(path);
-				path->RegisterSenderInterface(this);
-				usable_path_.insert(std::make_pair(pid,path));
-				if(scheduler_){
-					scheduler_->RegisterPath(pid);
-				}
+				syn_path_.erase(it++);
+				AddAvailablePath(path);
 				session_->PathStateForward(NOTIFYMESSAGE::notify_con_ack,pid);
 				NS_LOG_INFO("path "<<std::to_string(pid)<< "is usable rtt "<<std::to_string(rtt));
 				break;
+			}
+			else{
+				it++;
 			}
 		}
 	}
@@ -210,6 +208,15 @@ void MultipathSender::ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t*h
 		InnerProcessFeedback(pid,&feedback);
 		break;
 	}
+	}
+}
+void MultipathSender::AddAvailablePath(PathInfo*path){
+	AddController(path);
+    uint8_t pid=path->pid;
+	path->RegisterSenderInterface(this);
+	usable_path_.insert(std::make_pair(pid,path));
+	if(scheduler_){
+		scheduler_->RegisterPath(pid);
 	}
 }
 void MultipathSender::ProcessPongMsg(uint8_t pid,uint32_t rtt){
@@ -259,6 +266,9 @@ void MultipathSender::InnerProcessSegAck(uint8_t pid,sim_segment_ack_t* ack){
 	PathInfo *path=NULL;
 	path=GetPathInfo(pid);
 	if(path){
+        NS_LOG_INFO("ack "<<std::to_string(seg_c_)<<" "<<ack->base_packet_id);
+        NS_LOG_INFO("free segs "<<std::to_string(free_segs_.size())
+<<" sent size "<<std::to_string(free_segs_.size()));
 		path->RecvSegAck(ack);
 	}
 }
@@ -269,7 +279,7 @@ void MultipathSender::AddController(PathInfo *p){
 	CongestionController *controller=new CongestionController(this,p->pid);
 	sender=razor_sender_create(cc_type,padding,
 	(void*)controller,&MultipathSender::ChangeRate,
-	(void*)controller,&MultipathSender::PaceSend,1000);
+	(void*)p,&MultipathSender::PaceSend,1000);
 	controller->SetCongestion((void*)sender,zsy::ROLE::ROLE_SENDER);
 	p->SetController(controller);
 	sender->set_bitrates(sender,min_bitrate_,start_bitrate_,max_bitrate_);
@@ -306,9 +316,8 @@ void MultipathSender::SendVideo(uint8_t payload_type,int ftype,void *data,uint32
 	int64_t now=rtc::TimeMillis();
 	if(first_ts_==-1){
 		first_ts_=now;
-	}else{
-		timestamp=now-first_ts_;
 	}
+	timestamp=now-first_ts_;
 	uint8_t* pos;
 	uint16_t splits[MAX_SPLIT_NUMBER], total=0, i=0;
 	assert((size / SIM_VIDEO_SIZE) < MAX_SPLIT_NUMBER);
@@ -387,45 +396,8 @@ void MultipathSender::ChangeRate(void* trigger, uint32_t bitrate, uint8_t fracti
 	}
 }
 void MultipathSender::PaceSend(void * handler, uint32_t packet_id, int retrans, size_t size, int padding){
-	CongestionController *controller=static_cast<CongestionController*>(handler);
-	MultipathSender *mpsender=static_cast<MultipathSender*>(controller->session_);
-	uint8_t pid=controller->pid_;
-	PathInfo* path=NULL;
-	path=mpsender->GetPathInfo(pid);
-	razor_sender_t *cc=NULL;
-	cc=path->GetController()->s_cc_;
-	int64_t now=rtc::TimeMillis();
-	sim_header_t header;
-	sim_pad_t pad;
-	if(padding==1){
-		pad.transport_seq =path->trans_seq_;
-		path->trans_seq_++;
-		pad.send_ts = (uint16_t)(now - mpsender->first_ts_);
-		pad.data_size = SU_MIN(size, SIM_VIDEO_SIZE);
-		INIT_SIM_HEADER(header, SIM_PAD, mpsender->uid_);
-		header.ver=pid;
-		sim_encode_msg(&mpsender->strm_, &header, &pad);
-		if(cc){
-			cc->on_send(cc, pad.transport_seq, pad.data_size + SIM_SEGMENT_HEADER_SIZE);
-		}
-		su_udp_send(path->fd,&path->dst,mpsender->strm_.data,mpsender->strm_.used);
-	}else{
-	sim_segment_t *seg=NULL;
-	seg=path->get_segment(packet_id,retrans,now);
-	if(seg){
-		seg->transport_seq=path->trans_seq_;
-		path->trans_seq_++;
-		seg->send_ts = (uint16_t)(now - mpsender->first_ts_ - seg->timestamp);
-		INIT_SIM_HEADER(header, SIM_SEG, mpsender->uid_);
-		header.ver=pid;
-		sim_encode_msg(&mpsender->strm_, &header, seg);
-		if(cc){
-			cc->on_send(cc,seg->transport_seq, seg->data_size + SIM_SEGMENT_HEADER_SIZE);
-		}
-		su_udp_send(path->fd,&path->dst,mpsender->strm_.data,mpsender->strm_.used);
-	}
-	}
-
+	PathInfo* path=static_cast<PathInfo*>(handler);
+	path->PaceSend(packet_id,retrans,size,padding);
 }
 PathInfo* MultipathSender::GetPathInfo(uint8_t pid){
 	PathInfo *info=NULL;

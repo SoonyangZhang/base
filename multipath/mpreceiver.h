@@ -32,7 +32,8 @@ public:
 	void ProcessPongMsg(uint8_t pid,uint32_t rtt);
 	static void SendFeedBack(void* handler, const uint8_t* payload, int payload_size);
 	bool RegisterDataSink(NetworkDataConsumer* c);
-	void SendSegmentAck(uint8_t,sim_segment_ack_t *) override;
+    void DeliverToCache(uint8_t pid,sim_segment_t* d) override; 
+    uint32_t GetUid() override{return uid_;}
 private:
 	PathInfo *GetPath(uint8_t);
 	razor_receiver_t* GetRazorCC(uint32_t pid);
@@ -44,7 +45,6 @@ private:
 	void BuffCollection(video_frame_t*f);
 	void CheckDeliverFrame();
 	bool CheckLateFrame(uint32_t fid);
-	void DeliverToCache(uint8_t pid,sim_segment_t* d);
 	uint32_t GetWaittingDuration();
 	uint32_t uid_;
 	uint32_t min_bitrate_;

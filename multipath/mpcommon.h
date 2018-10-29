@@ -26,12 +26,14 @@ public:
 class ReceiverInterface{
 public:
 	virtual ~ReceiverInterface(){}
-	virtual void SendSegmentAck(uint8_t,sim_segment_ack_t *)=0;
+    virtual uint32_t GetUid()=0;
+    virtual void DeliverToCache(uint8_t pid,sim_segment_t* d)=0;
 };
 class SenderInterface{
 public:
 	virtual ~SenderInterface(){}
 	virtual int64_t GetFirstTs()=0;
+	virtual uint32_t GetUid()=0;
 	virtual void Reclaim(sim_segment_t *seg)=0;
 	virtual PathInfo* GetPathInfo(uint8_t)=0;
 	virtual void PacketSchedule(uint32_t,uint8_t)=0;

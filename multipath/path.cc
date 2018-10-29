@@ -1,7 +1,10 @@
 #include "path.h"
 #include "sim_proto.h"
 #include "rtc_base/timeutils.h"
+#include "log.h"
+#include <string>
 namespace zsy{
+NS_LOG_COMPONENT_DEFINE ("PathInfo");
 PathInfo::PathInfo()
 :fd(0),pid{0}
 ,state(path_ini)
@@ -26,6 +29,7 @@ controller_(NULL)
 ,mpsender_(NULL)
 ,receiver_last_heart_beat_(0)
 ,sender_last_heart_beat_(0){
+	bin_stream_init(&strm_);    
 }
 PathInfo::~PathInfo(){
 	if(controller_){
@@ -37,6 +41,7 @@ PathInfo::~PathInfo(){
 		free_buf_.pop();
 		delete buf;
 	}
+    bin_stream_destroy(&strm_);
 }
 void PathInfo::SenderHeartBeat(uint32_t ts){
 	if(sender_last_heart_beat_+5<ts){
@@ -131,6 +136,8 @@ sim_segment_t *PathInfo::get_segment(uint32_t id,int retrans,uint32_t ts){
 			sent_buf_.push_back(buf);
 		}
 	}
+    NS_LOG_INFO("path pending sent"<<std::to_string(buf_.size())
+                <<" "<<std::to_string(sent_buf_.size()));
     return seg;
 }
 uint32_t PathInfo::get_delay(){
@@ -177,6 +184,7 @@ void PathInfo::VideoRealAck(int hb,uint32_t seq){
 				break;
 			}
 		}
+        NS_LOG_INFO("ack id " <<std::to_string(ack.base_packet_id));
 		SendSegmentAck(&ack);
 		ack_ts_=now;
 	}
@@ -228,12 +236,26 @@ void PathInfo::RecvSegAck(sim_segment_ack_t* ack){
 }
 void PathInfo::SenderUpdateBase(uint32_t base_id){
 	uint32_t i=0;
-	for(i=base_seq_;i<=base_id;i++){
-		RemoveAckedPacket(i);
+	send_buf_t *buf_ptr=NULL;
+	for(auto it=sent_buf_.begin();it!=sent_buf_.end();){
+		buf_ptr=NULL;
+		if((*it)->seg->packet_id<=base_id){
+			buf_ptr=(*it);
+			sent_buf_.erase(it++);
+			if(buf_ptr){
+                i++;
+				mpsender_->Reclaim(buf_ptr->seg);
+				buf_ptr->seg=NULL;
+				free_buf_.push(buf_ptr);
+			}
+		}else{
+			it++;
+		}
 	}
 	if(base_seq_<base_id){
 		base_seq_=base_id;
 	}
+     NS_LOG_INFO("free sentbuf "<<std::to_string(i)<< " baseid "<<std::to_string(base_id));   
 }
 void PathInfo::RemoveAckedPacket(uint32_t seq){
 	send_buf_t *buf_ptr=NULL;
@@ -241,6 +263,7 @@ void PathInfo::RemoveAckedPacket(uint32_t seq){
 		if((*it)->seg->packet_id==seq){
 			buf_ptr=(*it);
 			sent_buf_.erase(it++);
+            break;
 		}else{
 			it++;
 		}
@@ -252,8 +275,69 @@ void PathInfo::RemoveAckedPacket(uint32_t seq){
 	}
 }
 void PathInfo::SendSegmentAck(sim_segment_ack_t *ack){
+    uint32_t uid=0;
 	if(mpreceiver_){
-		mpreceiver_->SendSegmentAck(pid,ack);
+		uid=mpreceiver_->GetUid();
+	}
+	sim_header_t header;
+	INIT_SIM_HEADER(header, SIM_SEG_ACK, uid);
+	header.ver=pid;
+	sim_encode_msg(&strm_, &header, ack);
+	SendToNetwork(strm_.data,strm_.used);
+}
+void PathInfo::SendFeedback(const uint8_t* payload, int payload_size){
+	sim_header_t header;
+	sim_feedback_t feedback;
+	if (payload_size > SIM_FEEDBACK_SIZE){
+		NS_LOG_ERROR("feedback size > SIM_FEEDBACK_SIZE");
+		return;
+	}
+    uint32_t uid=0;
+	if(mpreceiver_){
+		uid=mpreceiver_->GetUid();
+	}
+	INIT_SIM_HEADER(header, SIM_FEEDBACK, uid);
+    header.ver=pid;
+	feedback.base_packet_id =base_seq_;
+	feedback.feedback_size = payload_size;
+	memcpy(feedback.feedback, payload, payload_size);
+	sim_encode_msg(&strm_, &header, &feedback);
+	SendToNetwork(strm_.data,strm_.used);
+}
+void PathInfo::PaceSend(uint32_t packet_id, int retrans, size_t size, int padding){
+    uint32_t uid=mpsender_->GetUid();
+	razor_sender_t *cc=NULL;
+	cc=GetController()->s_cc_;
+	int64_t now=rtc::TimeMillis();
+	sim_header_t header;
+	sim_pad_t pad;
+	if(padding==1){
+		pad.transport_seq =trans_seq_;
+		trans_seq_++;
+		pad.send_ts = (uint16_t)(now - mpsender_->GetFirstTs());
+		pad.data_size = SU_MIN(size, SIM_VIDEO_SIZE);
+		INIT_SIM_HEADER(header, SIM_PAD, uid);
+		header.ver=pid;
+		sim_encode_msg(&strm_, &header, &pad);
+		if(cc){
+			cc->on_send(cc, pad.transport_seq, pad.data_size + SIM_SEGMENT_HEADER_SIZE);
+		}
+		SendToNetwork(strm_.data,strm_.used);
+	}else{
+	sim_segment_t *seg=NULL;
+	seg=get_segment(packet_id,retrans,now);
+	if(seg){
+		seg->transport_seq=trans_seq_;
+		trans_seq_++;
+		seg->send_ts = (uint16_t)(now - mpsender_->GetFirstTs()- seg->timestamp);
+		INIT_SIM_HEADER(header, SIM_SEG, uid);
+		header.ver=pid;
+		sim_encode_msg(&strm_, &header, seg);
+		if(cc){
+			cc->on_send(cc,seg->transport_seq, seg->data_size + SIM_SEGMENT_HEADER_SIZE);
+		}
+		SendToNetwork(strm_.data,strm_.used);
+	}
 	}
 }
 void PathInfo::UpdateRtt(uint32_t time){
@@ -317,9 +401,10 @@ void PathInfo::UpdataLoss(uint32_t seq){
 	uint32_t i=0;
 	LossTableRemove(seq);
 	for(i=max_seq_+1;i<seq;i++){
-		bool exist=LossTableSeqExist(seq);
+		bool exist=LossTableSeqExist(i);
 		if(!exist){
-			loss_.insert(seq);
+            printf("l %d\t%d\n",pid,i);
+			loss_.insert(i);
 		}
 	}
 }
@@ -333,24 +418,75 @@ void PathInfo::UpdataSendTs(uint32_t ts){
 		s_sent_ts_=(smooth_num*s_sent_ts_+(smooth_den-smooth_num)*ts)/smooth_den;
 	}
 }
+void PathInfo::UpdataRecvTable(uint32_t seq){
+	if(seq==base_seq_+1){
+		base_seq_=seq;
+	}else{
+		recv_table_.insert(seq);
+	}
+	while(!recv_table_.empty()){
+		auto it=recv_table_.begin();
+		uint32_t key=(*it);
+		if(key==base_seq_+1){
+			recv_table_.erase(it);
+			base_seq_=key;
+		}else{
+			break;
+		}
+	}
+}
+void PathInfo::RecvTableRemoveUntil(uint32_t seq){
+	if(base_seq_<=seq){
+		base_seq_=seq;
+	}
+    printf("r %d\t%d\n",base_seq_,seq);
+	while(!recv_table_.empty()){
+		auto it=recv_table_.begin();
+		uint32_t key=(*it);
+		if(key<=seq){
+			recv_table_.erase(it);
+		}else{
+			break;
+		}
+	}
+	while(!recv_table_.empty()){
+		auto it=recv_table_.begin();
+		uint32_t key=(*it);
+		if(key==base_seq_+1){
+			recv_table_.erase(it);
+			base_seq_=key;
+		}else{
+			break;
+		}
+    }
+}
+#include<stdio.h>
 void PathInfo::OnReceiveSegment(sim_segment_t *seg){
 	uint32_t seq=seg->packet_id;
+    if(seq<base_seq_){
+        printf("e%d\t%d\t%d\t\n",pid,seq,base_seq_);
+        return ;
+    }
 	if(max_seq_==0&&seg->packet_id>seg->index){
 		max_seq_=seg->packet_id-seg->index-1;
 		base_seq_ = seg->packet_id - seg->index - 1;
 	}
+	if(mpreceiver_){
+		mpreceiver_->DeliverToCache(pid,seg);
+	}    
 	UpdataSendTs(seg->send_ts);
 	UpdataLoss(seq);
 	max_seq_=SU_MAX(max_seq_,seq);
-	if (seq == base_seq_ + 1)
-		base_seq_ = seq;
+	UpdataRecvTable(seq);
 	VideoRealAck(0,seq);
+    printf("%d\t%d\t%d\t%d\t%d\n",pid,seq,base_seq_,max_seq_,seg->ftype);
 }
 // do not wait
 void PathInfo::Consume(uint32_t packet_id){
-	if(base_seq_<packet_id){
-		base_seq_=packet_id;
-	}
     LossTableRemoveUntil(packet_id);
+    RecvTableRemoveUntil(packet_id);
+}
+void PathInfo::SendToNetwork(uint8_t*data,uint32_t len){
+	su_udp_send(fd,&dst,data, len);
 }
 }

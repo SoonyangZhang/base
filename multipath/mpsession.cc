@@ -55,7 +55,13 @@ MultipathSession::MultipathSession(int port,uint32_t uid)
 		if(ip.compare(localAddr)){
 			su_socket fd;
 			su_udp_create(ip.c_str(),port,&fd);
-            NS_LOG_INFO("new fd "<<fd);
+            int listendAddrLen=0;
+            su_addr listendAddr;
+            listendAddrLen = sizeof(listendAddr);
+            getsockname((int)fd, (struct sockaddr *)&listendAddr, (socklen_t*)&listendAddrLen);
+            char buf[128]={0};
+            su_addr_to_string(&listendAddr,buf,128);
+            NS_LOG_INFO("new fd "<<fd<<" "<<buf);
 			su_udp_noblocking(fd);
 			fds_.push_back(fd);
 			su_addr addr;
@@ -76,6 +82,26 @@ MultipathSession::~MultipathSession(){
 	}
 	if(receiver_){
 		delete receiver_;
+	}
+}
+void MultipathSession::PostMessage(SessionMessage&msg){
+	rtc::CritScope cs(&message_lock_);
+	message_.push_back(msg);
+}
+void MultipathSession::HandleMessage(){
+	rtc::CritScope cs(&message_lock_);
+	if(!message_.empty()){
+		SessionMessage msg;
+		msg=message_.front();
+		message_.pop_front();
+		switch(msg.type){
+		case message_send_dis:{
+			Disconnect();
+			break;
+		}
+		default :
+			break;
+		}
 	}
 }
 void MultipathSession::RegisterCallback(sim_notify_fn notify,void *arg){
@@ -131,6 +157,7 @@ void MultipathSession::Connect(int num,...){
 }
 void MultipathSession::Disconnect(){
 	send_dis_=true;
+    StopSession();
 	SendDisconMsg();
 }
 void MultipathSession::SendDisconMsg(){
@@ -172,6 +199,7 @@ void MultipathSession::Run(){
 	bin_stream_init(&rstrm);
 	bin_stream_resize(&rstrm, 1500);
 	while(running_){
+        HandleMessage();
 		if(send_dis_){
 			if(!recv_dis_){
 				uint32_t now=rtc::TimeMillis();
@@ -183,11 +211,10 @@ void MultipathSession::Run(){
 					if(notify_cb_){
 						notify_cb_(notify_arg_,NOTIFYMESSAGE::notify_dis,0);
 					}
-					StopSession();
 				}
 			}
 		}
-		if(!fds_.empty()&&!recv_dis_){
+		if(!fds_.empty()&&!recv_dis_&&!send_dis_){
 			if(sender_){
 				sender_->Process();
 			}

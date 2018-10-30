@@ -15,6 +15,8 @@ private:
 	std::map<uint8_t,uint32_t> path_rate_table_;
 	RateChangeCallback *cb_;
 	SenderInterface *sender_;
+    uint32_t first_ts_;
+    uint8_t a_pid_{10};
 };
 }
 

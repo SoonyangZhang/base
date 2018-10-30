@@ -50,6 +50,8 @@ void UpdataSendTs(uint32_t ts);
 send_buf_t *AllocateSentBuf();
 void FreePendingBuf();
 void FreeSentBuf();
+void RemoveSentBufUntil(uint32_t);
+void SentBufCollection(uint32_t now);
 public:
 su_addr src;
 su_addr dst;
@@ -92,6 +94,7 @@ SenderInterface *mpsender_;
 uint32_t receiver_last_heart_beat_;
 uint32_t sender_last_heart_beat_;
 bin_stream_t	strm_;
+uint32_t last_sentbuf_collect_ts_;
 };
 }
 

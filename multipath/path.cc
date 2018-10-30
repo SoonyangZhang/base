@@ -29,7 +29,8 @@ controller_(NULL)
 ,mpreceiver_(NULL)
 ,mpsender_(NULL)
 ,receiver_last_heart_beat_(0)
-,sender_last_heart_beat_(0){
+,sender_last_heart_beat_(0)
+,last_sentbuf_collect_ts_(0){
 	bin_stream_init(&strm_);    
 }
 PathInfo::~PathInfo(){
@@ -44,6 +45,8 @@ PathInfo::~PathInfo(){
 	}
     bin_stream_destroy(&strm_);
 }
+static uint32_t max_tolerate_sent_offset=500;
+static uint32_t buf_collect_time=600;
 void PathInfo::SenderHeartBeat(uint32_t ts){
 	if(sender_last_heart_beat_+5<ts){
 		razor_sender_t *cc=NULL;
@@ -53,6 +56,7 @@ void PathInfo::SenderHeartBeat(uint32_t ts){
 		}
 		sender_last_heart_beat_=ts;
 	}
+	SentBufCollection(ts);
 }
 void PathInfo::ReceiverHeartBeat(uint32_t ts){
 	if(receiver_last_heart_beat_+5<ts){
@@ -73,7 +77,7 @@ bool PathInfo::put(sim_segment_t*seg){
 	if(it!=buf_.end()){
 		return false;
 	}
-	printf("%d send buf %d\n",pid,buf_.size());
+	//printf("%d send buf %d\n",pid,buf_.size());
 	len_+=(seg->data_size+SIM_SEGMENT_HEADER_SIZE);
 	buf_.insert(std::make_pair(id,seg));
 	razor_sender_t *cc=NULL;
@@ -128,21 +132,18 @@ sim_segment_t *PathInfo::get_segment(uint32_t id,int retrans,uint32_t ts){
 			sent_buf_.push_back(send_buf);
 		}
 	}else{
-		send_buf_t *buf=NULL;
 		for(auto it=sent_buf_.begin();it!=sent_buf_.end();){
 			send_buf_t *ptr=(*it);
+			if(ptr->seg->packet_id>id){
+				// the sent_buf_ is in order;
+				break;
+			}
 			if(ptr->seg->packet_id==id){
-				buf=ptr;
-				it=sent_buf_.erase(it);
+				seg=ptr->seg;
 				break;
 			}else{
 				it++;
 			}
-		}
-		if(buf){
-			seg=buf->seg;
-			buf->ts=ts;
-			sent_buf_.push_back(buf);
 		}
 	}
     //NS_LOG_INFO("path pending sent"<<std::to_string(buf_.size())
@@ -227,7 +228,6 @@ send_buf_t * PathInfo::GetSentPacketInfo(uint32_t seq){
 //TODO
 // rtt to avoid excessive retrans
 // may record minrtt;
-static uint32_t max_tolerate_sent_offset=1000;
 void PathInfo::RecvSegAck(sim_segment_ack_t* ack){
 	if (ack->acked_packet_id >packet_seed_ || ack->base_packet_id > packet_seed_)
 		return;
@@ -247,7 +247,7 @@ void PathInfo::RecvSegAck(sim_segment_ack_t* ack){
 	cc=controller_->s_cc_;
 	for(i=0;i<ack->nack_num;i++){
 		uint32_t seq=ack->base_packet_id+ack->nack[i];
-		temp=GetSentPacketInfo(seq);
+		temp=NULL;//test not retrasmission//GetSentPacketInfo(seq);
 		if(temp){
 			seg=temp->seg;
 			uint32_t sent_offset=now - mpsender_->GetFirstTs()- seg->timestamp;
@@ -259,7 +259,7 @@ void PathInfo::RecvSegAck(sim_segment_ack_t* ack){
 					}
 				}
 			}else{
-				RemoveAckedPacket(seg->packet_id);
+				RemoveSentBufUntil(seg->packet_id);
 			}
 
 		}
@@ -267,27 +267,7 @@ void PathInfo::RecvSegAck(sim_segment_ack_t* ack){
 
 }
 void PathInfo::SenderUpdateBase(uint32_t base_id){
-	uint32_t i=0;
-	send_buf_t *buf_ptr=NULL;
-	for(auto it=sent_buf_.begin();it!=sent_buf_.end();){
-		buf_ptr=NULL;
-		if((*it)->seg->packet_id<=base_id){
-			buf_ptr=(*it);
-			sent_buf_.erase(it++);
-			if(buf_ptr){
-                i++;
-				mpsender_->Reclaim(buf_ptr->seg);
-				buf_ptr->seg=NULL;
-				free_buf_.push(buf_ptr);
-			}
-		}else{
-			it++;
-		}
-	}
-	if(base_seq_<base_id){
-		base_seq_=base_id;
-	}
-     //NS_LOG_INFO("free sentbuf "<<std::to_string(i)<< " baseid "<<std::to_string(base_id));   
+    RemoveSentBufUntil(base_id);  
 }
 void PathInfo::RemoveAckedPacket(uint32_t seq){
 	send_buf_t *buf_ptr=NULL;
@@ -303,7 +283,57 @@ void PathInfo::RemoveAckedPacket(uint32_t seq){
 	if(buf_ptr){
 		mpsender_->Reclaim(buf_ptr->seg);
 		buf_ptr->seg=NULL;
+		memset(buf_ptr,0,sizeof(send_buf_t));
 		free_buf_.push(buf_ptr);
+	}
+}
+void PathInfo::RemoveSentBufUntil(uint32_t seq){
+	if(base_seq_<=seq){
+		base_seq_=seq;
+	}
+	send_buf_t *buf_ptr=NULL;
+	for(auto it=sent_buf_.begin();it!=sent_buf_.end();){
+		uint32_t id=(*it)->seg->packet_id;
+		buf_ptr=NULL;
+		if(id<=seq){
+			buf_ptr=(*it);
+			sent_buf_.erase(it++);
+		}else{
+			break;
+		}
+		if(buf_ptr){
+			mpsender_->Reclaim(buf_ptr->seg);
+			buf_ptr->seg=NULL;
+			memset(buf_ptr,0,sizeof(send_buf_t));
+			free_buf_.push(buf_ptr);
+		}
+	}
+}
+void PathInfo::SentBufCollection(uint32_t now){
+	if(last_sentbuf_collect_ts_==0){
+		last_sentbuf_collect_ts_=now;
+				return;
+	}
+	uint32_t delta=now-last_sentbuf_collect_ts_;
+	if(delta>buf_collect_time){
+		last_sentbuf_collect_ts_=now;
+		send_buf_t *ptr=NULL;
+		sim_segment_t *seg=NULL;
+		for(auto it=sent_buf_.begin();it!=sent_buf_.end();){
+			ptr=(*it);
+			seg=ptr->seg;
+			uint32_t sent_offset=now - mpsender_->GetFirstTs()- seg->timestamp;
+			if(sent_offset<=max_tolerate_sent_offset){
+				break;
+			}
+			else{
+				sent_buf_.erase(it++);
+				mpsender_->Reclaim(seg);
+				ptr->seg=NULL;
+				memset(ptr,0,sizeof(send_buf_t));
+				free_buf_.push(ptr);
+			}
+		}
 	}
 }
 void PathInfo::SendSegmentAck(sim_segment_ack_t *ack){

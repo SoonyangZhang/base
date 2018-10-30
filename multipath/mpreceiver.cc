@@ -13,7 +13,9 @@ MultipathReceiver::MultipathReceiver(SessionInterface*session,uint32_t uid)
 ,session_(session)
 ,seg_c_(0)
 ,deliver_(NULL),
-stop_(false){
+stop_(false)
+,last_deliver_ts_{0}
+,min_fid_(0){
 	bin_stream_init(&strm_);
 	for(int i=0;i<2;i++){
 		video_packet_t *v_packet=new video_packet_t();
@@ -168,10 +170,13 @@ bool MultipathReceiver::DeliverFrame(video_frame_t *f){
 		deliver_->ForwardUp(fid,buf,offset,f->recv,f->total);
 		delete [] buf;
 		ret=true;
+		if(min_fid_<fid){
+			min_fid_=fid;
+		}
 	}
 	return ret;
 }
-void MultipathReceiver::FrameConsumed(video_frame_t *f){
+void MultipathReceiver::PacketConsumed(video_frame_t *f){
 	video_packet_t *packet=NULL;
 	PathInfo *path=NULL;
 	uint8_t pid=0;
@@ -195,8 +200,32 @@ void MultipathReceiver::BuffCollection(video_frame_t*f){
 	for(i=0;i<f->total;i++){
 		packet=f->packets[i];
 		if(packet){
+			memset(packet,0,sizeof(video_packet_t));
 			free_segs_.push(packet);
 			f->packets[i]=NULL;
+		}
+	}
+}
+void MultipathReceiver::UpdateDeliverTime(uint32_t ts){
+	last_deliver_ts_=ts;
+}
+static uint32_t max_deliver_wait=500;
+static uint32_t mem_id=0;
+void  MultipathReceiver::CheckFrameDeliverBlock(uint32_t now){
+	if(last_deliver_ts_==0){
+
+	}else{
+		uint32_t delta=now-last_deliver_ts_;
+		if(delta>max_deliver_wait){
+			if(!frame_cache_.empty()){
+				video_frame_t *frame=NULL;
+				auto it=frame_cache_.begin();
+				frame=it->second;
+                uint32_t fid=frame->fid;
+                if(mem_id!=fid){printf("block %d %d\n",fid,frame->frame_type);}
+                mem_id=fid;
+				
+			}
 		}
 	}
 }
@@ -209,13 +238,15 @@ void MultipathReceiver::CheckDeliverFrame(){
 		waitting_for_delete=NULL;
 		if(frame->recv==frame->total){
 			DeliverFrame(frame);
-			FrameConsumed(frame);
+			PacketConsumed(frame);
+			UpdateDeliverTime(now);
 			waitting_for_delete=frame;
 		}else if(frame->recv<frame->total){
 			if(frame->waitting_ts!=-1){
 				if(now>frame->waitting_ts){
 					DeliverFrame(frame);
-					FrameConsumed(frame);
+					PacketConsumed(frame);
+					UpdateDeliverTime(now);
 					waitting_for_delete=frame;
 				}
 			}else{
@@ -234,14 +265,9 @@ void MultipathReceiver::CheckDeliverFrame(){
 //true means not to deliver frame
 bool MultipathReceiver::CheckLateFrame(uint32_t fid){
 	bool ret=false;
-	if(frame_cache_.empty()){
-	}else{
-		auto it=frame_cache_.begin();
-		uint8_t min_fid=it->first;
-		if(fid<min_fid){
-		NS_LOG_WARN("late come frame");
-			ret=true;
-		}
+	if(fid<=min_fid_){
+        printf("late %d %d\n",fid,min_fid_);
+		ret=true;
 	}
 	return ret;
 }
@@ -305,7 +331,6 @@ void MultipathReceiver::DeliverToCache(uint8_t pid,sim_segment_t* d){
 	if(!free_segs_.empty()){
 		packet=free_segs_.front();
 		free_segs_.pop();
-        memset(packet,0,sizeof(video_packet_t));
 	}else{
 		packet=new video_packet_t();
 		seg_c_++;
@@ -322,7 +347,6 @@ void MultipathReceiver::DeliverToCache(uint8_t pid,sim_segment_t* d){
 	if(frame->recv<frame->total&&frame->waitting_ts!=-1){
 		frame->waitting_ts=now+GetWaittingDuration();
 	}
-	CheckDeliverFrame();
 }
 void MultipathReceiver::ProcessPongMsg(uint8_t pid,uint32_t rtt){
     if(stop_){return ;}
@@ -373,7 +397,8 @@ void MultipathReceiver::Process(){
 			SendPingMsg(path,now);
 		}
 	}
-
+	CheckDeliverFrame();
+	CheckFrameDeliverBlock(now);
 }
 void MultipathReceiver::Stop(){
 	PathInfo *path=NULL;

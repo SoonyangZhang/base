@@ -41,11 +41,13 @@ private:
 	void SendConnectAck(PathInfo *path,uint32_t cid);
 	void ConfigureController(PathInfo *path,uint8_t transport_type);
 	bool DeliverFrame(video_frame_t *f);
-	void FrameConsumed(video_frame_t *f);
+	void PacketConsumed(video_frame_t *f);
 	void BuffCollection(video_frame_t*f);
 	void CheckDeliverFrame();
 	bool CheckLateFrame(uint32_t fid);
 	uint32_t GetWaittingDuration();
+	void UpdateDeliverTime(uint32_t ts);
+	void CheckFrameDeliverBlock(uint32_t);
 	uint32_t uid_;
 	uint32_t min_bitrate_;
 	uint32_t max_bitrate_;
@@ -58,6 +60,8 @@ private:
 	std::map<uint32_t,video_frame_t*> frame_cache_;
 	NetworkDataConsumer *deliver_;
 	bool stop_;
+	uint32_t last_deliver_ts_;
+	uint32_t min_fid_;//record the fid that has deliverd to uplayer;
 };
 }
 #endif /* SIM_TRANSPORT_MPRECEIVER_H_ */

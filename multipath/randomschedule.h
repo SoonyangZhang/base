@@ -4,6 +4,7 @@
 #include "schedule.h"
 #include "random-variable-stream.h"
 namespace zsy{
+// implement in round robin way
 class RandomSchedule:public Schedule{
 public:
 	RandomSchedule();
@@ -14,7 +15,8 @@ void RegisterPath(uint8_t) override;
 void UnregisterPath(uint8_t) override;
 private:
 	std::vector<uint8_t> pids_;
-	ns3::UniformRandomVariable uniform_;
+	ns3::UniformRandomVariable uniform_; 
+    uint32_t last_index_;
 };
 }
 

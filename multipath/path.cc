@@ -3,6 +3,7 @@
 #include "rtc_base/timeutils.h"
 #include "log.h"
 #include <string>
+#include<stdio.h>
 namespace zsy{
 NS_LOG_COMPONENT_DEFINE ("PathInfo");
 PathInfo::PathInfo()
@@ -403,7 +404,7 @@ void PathInfo::UpdataLoss(uint32_t seq){
 	for(i=max_seq_+1;i<seq;i++){
 		bool exist=LossTableSeqExist(i);
 		if(!exist){
-            //printf("l %d\t%d\n",pid,i);
+            printf("l %d\t%d\n",pid,i);
 			loss_.insert(i);
 		}
 	}
@@ -457,9 +458,6 @@ void PathInfo::UpdataRecvTable(uint32_t seq){
 	}
 }
 void PathInfo::RecvTableRemoveUntil(uint32_t seq){
-	if(base_seq_<=seq){
-		base_seq_=seq;
-	}
     //printf("r %d\t%d\n",base_seq_,seq);
 	while(!recv_table_.empty()){
 		auto it=recv_table_.begin();
@@ -469,6 +467,9 @@ void PathInfo::RecvTableRemoveUntil(uint32_t seq){
 		}else{
 			break;
 		}
+	}
+	if(base_seq_<=seq){
+		base_seq_=seq;
 	}
 	while(!recv_table_.empty()){
 		auto it=recv_table_.begin();
@@ -481,7 +482,6 @@ void PathInfo::RecvTableRemoveUntil(uint32_t seq){
 		}
     }
 }
-#include<stdio.h>
 void PathInfo::OnReceiveSegment(sim_segment_t *seg){
 	uint32_t seq=seg->packet_id;
     if(seq<base_seq_){

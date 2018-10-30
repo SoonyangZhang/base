@@ -8,7 +8,6 @@
 namespace zsy{
 struct video_packet_t{
 	uint8_t pid;
-	uint32_t ts;
 	sim_segment_t seg;
 };
 struct video_frame_t{

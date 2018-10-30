@@ -70,6 +70,7 @@ private:
 	Schedule *scheduler_;
 	RateControl *rate_control_;
 	bool stop_;
+	uint32_t max_free_buf_th_;
 };
 }
 

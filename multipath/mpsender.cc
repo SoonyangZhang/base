@@ -21,9 +21,10 @@ MultipathSender::MultipathSender(SessionInterface *session,uint32_t uid)
 ,max_bitrate_(MAX_BITRATE)
 ,scheduler_(NULL)
 ,rate_control_(NULL)
-,stop_(false){
+,stop_(false)
+,max_free_buf_th_(50){
 	bin_stream_init(&strm_);
-	for(int i=0;i<2;i++){
+	for(int i=0;i<40;i++){
 		sim_segment_t *seg=new sim_segment_t();
 		free_segs_.push(seg);
 		seg_c_++;
@@ -31,7 +32,8 @@ MultipathSender::MultipathSender(SessionInterface *session,uint32_t uid)
 }
 MultipathSender::~MultipathSender(){
 	bin_stream_destroy(&strm_);
-    NS_LOG_INFO("seg"<<std::to_string(seg_c_));
+    //NS_LOG_INFO("seg"<<std::to_string(seg_c_));
+	printf("dtor seg %d\n",seg_c_);
 	sim_segment_t *seg=NULL;
 	while(!pending_buf_.empty()){
 		auto it=pending_buf_.begin();
@@ -45,7 +47,7 @@ MultipathSender::~MultipathSender(){
 		seg_c_--;
 		delete seg;
 	}
-NS_LOG_INFO("seg"<<std::to_string(seg_c_));
+	NS_LOG_INFO("seg"<<std::to_string(seg_c_));
 }
 static uint32_t PING_INTERVAL=250;
 void MultipathSender::Process(){
@@ -266,9 +268,6 @@ void MultipathSender::InnerProcessSegAck(uint8_t pid,sim_segment_ack_t* ack){
 	PathInfo *path=NULL;
 	path=GetPathInfo(pid);
 	if(path){
-        NS_LOG_INFO("ack "<<std::to_string(seg_c_)<<" "<<ack->base_packet_id);
-        NS_LOG_INFO("free segs "<<std::to_string(free_segs_.size())
-<<" sent size "<<std::to_string(free_segs_.size()));
 		path->RecvSegAck(ack);
 	}
 }
@@ -358,7 +357,7 @@ void MultipathSender::SendVideo(uint8_t payload_type,int ftype,void *data,uint32
 			}
 		}
 	}
-	NS_LOG_INFO("buf_size"<<std::to_string(buf.size()));
+	//NS_LOG_INFO("buf_size"<<std::to_string(buf.size()));
 	{
 		i=0;
 		rtc::CritScope cs(&buf_mutex_);
@@ -423,14 +422,7 @@ void MultipathSender::PacketSchedule(uint32_t schedule_id,uint8_t pid){
 		auto it=usable_path_.find(pid);
 		if(it!=usable_path_.end()){
 			path=it->second;
-			seg->packet_id=path->packet_seed_;
-			path->packet_seed_++;
 			path->put(seg);
-			razor_sender_t *cc=NULL;
-			cc=path->GetController()->s_cc_;
-			if(cc){
-				cc->add_packet(cc, seg->packet_id, 0, seg->data_size + SIM_SEGMENT_HEADER_SIZE);
-			}
 		}else{
 			NS_LOG_ERROR("fatal packet schedule error");
 		}
@@ -448,5 +440,17 @@ void MultipathSender::Reclaim(sim_segment_t *seg){
 	rtc::CritScope cs(&free_mutex_);
     memset(seg,0,sizeof(sim_segment_t));
 	free_segs_.push(seg);
+	uint32_t i=0;
+	uint32_t free=free_segs_.size();
+	//printf("free segs %d\n",free);
+	if(free>max_free_buf_th_){
+		sim_segment_t *temp=NULL;
+		for(i=0;i<free;i++){
+			temp=free_segs_.front();
+			free_segs_.pop();
+			seg_c_--;
+			delete temp;
+		}
+	}
 }
 }

@@ -66,13 +66,21 @@ void PathInfo::ReceiverHeartBeat(uint32_t ts){
 	}
 }
 bool PathInfo::put(sim_segment_t*seg){
+	seg->packet_id=packet_seed_;
+	packet_seed_++;
 	uint32_t id=seg->packet_id;
 	auto it=buf_.find(id);
 	if(it!=buf_.end()){
 		return false;
 	}
+	printf("%d send buf %d\n",pid,buf_.size());
 	len_+=(seg->data_size+SIM_SEGMENT_HEADER_SIZE);
 	buf_.insert(std::make_pair(id,seg));
+	razor_sender_t *cc=NULL;
+	cc=GetController()->s_cc_;
+	if(cc){
+		cc->add_packet(cc, seg->packet_id, 0, seg->data_size + SIM_SEGMENT_HEADER_SIZE);
+	}
 	return true;
 }
 send_buf_t * PathInfo::AllocateSentBuf(){
@@ -137,8 +145,14 @@ sim_segment_t *PathInfo::get_segment(uint32_t id,int retrans,uint32_t ts){
 			sent_buf_.push_back(buf);
 		}
 	}
-    NS_LOG_INFO("path pending sent"<<std::to_string(buf_.size())
-                <<" "<<std::to_string(sent_buf_.size()));
+    //NS_LOG_INFO("path pending sent"<<std::to_string(buf_.size())
+    //            <<" "<<std::to_string(sent_buf_.size()));
+    uint32_t sent_size=sent_buf_.size();
+    if(sent_size>500)
+    {
+    printf(" p %d sent %u\n",pid,sent_size);
+    }
+	
     return seg;
 }
 uint32_t PathInfo::get_delay(){
@@ -172,7 +186,15 @@ void PathInfo::VideoRealAck(int hb,uint32_t seq){
 		ack.base_packet_id = base_seq_;
 		ack.nack_num = 0;
 		ack.acked_packet_id = seq;
-		for(auto it=loss_.begin();it!=loss_.end();it++){
+		auto it=loss_.begin();
+		if(loss_.size()>NACK_NUM){
+			uint32_t i=0;
+			uint32_t total=loss_.size()-NACK_NUM;
+			for(i=0;i<total;i++){
+				it++;
+			}
+		}
+		for(;it!=loss_.end();it++){
 			uint32_t key=(*it);
 			if(key<base_seq_){
 				continue;
@@ -185,7 +207,7 @@ void PathInfo::VideoRealAck(int hb,uint32_t seq){
 				break;
 			}
 		}
-        NS_LOG_INFO("ack id " <<std::to_string(ack.base_packet_id));
+        //NS_LOG_INFO("ack id " <<std::to_string(ack.base_packet_id));
 		SendSegmentAck(&ack);
 		ack_ts_=now;
 	}
@@ -205,6 +227,7 @@ send_buf_t * PathInfo::GetSentPacketInfo(uint32_t seq){
 //TODO
 // rtt to avoid excessive retrans
 // may record minrtt;
+static uint32_t max_tolerate_sent_offset=1000;
 void PathInfo::RecvSegAck(sim_segment_ack_t* ack){
 	if (ack->acked_packet_id >packet_seed_ || ack->base_packet_id > packet_seed_)
 		return;
@@ -226,11 +249,19 @@ void PathInfo::RecvSegAck(sim_segment_ack_t* ack){
 		uint32_t seq=ack->base_packet_id+ack->nack[i];
 		temp=GetSentPacketInfo(seq);
 		if(temp){
-			if((now-temp->ts)>minrtt&&cc){
-				temp->ts=now;
-				seg=temp->seg;
-				cc->add_packet(cc,seg->packet_id, 1, seg->data_size + SIM_SEGMENT_HEADER_SIZE);
+			seg=temp->seg;
+			uint32_t sent_offset=now - mpsender_->GetFirstTs()- seg->timestamp;
+			if(sent_offset<max_tolerate_sent_offset){
+				if((now-temp->ts)>minrtt){
+					temp->ts=now;
+					if(cc){
+						cc->add_packet(cc,seg->packet_id, 1, seg->data_size + SIM_SEGMENT_HEADER_SIZE);
+					}
+				}
+			}else{
+				RemoveAckedPacket(seg->packet_id);
 			}
+
 		}
 	}
 
@@ -256,7 +287,7 @@ void PathInfo::SenderUpdateBase(uint32_t base_id){
 	if(base_seq_<base_id){
 		base_seq_=base_id;
 	}
-     NS_LOG_INFO("free sentbuf "<<std::to_string(i)<< " baseid "<<std::to_string(base_id));   
+     //NS_LOG_INFO("free sentbuf "<<std::to_string(i)<< " baseid "<<std::to_string(base_id));   
 }
 void PathInfo::RemoveAckedPacket(uint32_t seq){
 	send_buf_t *buf_ptr=NULL;
@@ -412,7 +443,9 @@ void PathInfo::UpdataLoss(uint32_t seq){
 //pace queue delay at the sender side
 static uint32_t smooth_num=90;
 static uint32_t smooth_den=100;
+static uint32_t max_sent_ts_offset=500;
 void PathInfo::UpdataSendTs(uint32_t ts){
+	if(ts>max_sent_ts_offset){return;}
 	if(s_sent_ts_==0){
 		s_sent_ts_=ts;
 	}else{
@@ -482,8 +515,20 @@ void PathInfo::RecvTableRemoveUntil(uint32_t seq){
 		}
     }
 }
+bool PathInfo::CheckRecvTableExist(uint32_t seq){
+    bool ret=false;
+    auto it=recv_table_.find(seq);
+    if(it!=recv_table_.end()){
+    ret=true;
+    }
+    return ret;
+   }
 void PathInfo::OnReceiveSegment(sim_segment_t *seg){
 	uint32_t seq=seg->packet_id;
+    if(CheckRecvTableExist(seq))
+    {
+        return;
+    }
     if(seq<base_seq_){
         printf("e%d\t%d\t%d\t\n",pid,seq,base_seq_);
         return ;

@@ -10,7 +10,7 @@
 using namespace zsy;
 using namespace ns3;
 bool running=true;
-uint32_t run_time=50000;
+uint32_t run_time=100000;
 void signal_exit_handler(int sig)
 {
 	running=false;

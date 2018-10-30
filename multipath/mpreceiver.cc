@@ -229,6 +229,7 @@ void  MultipathReceiver::CheckFrameDeliverBlock(uint32_t now){
 		}
 	}
 }
+static uint32_t max_frame_waitting=500;
 void MultipathReceiver::CheckDeliverFrame(){
 	video_frame_t *frame=NULL;
 	video_frame_t *waitting_for_delete=NULL;
@@ -243,7 +244,8 @@ void MultipathReceiver::CheckDeliverFrame(){
 			waitting_for_delete=frame;
 		}else if(frame->recv<frame->total){
 			if(frame->waitting_ts!=-1){
-				if(now>frame->waitting_ts){
+                uint32_t delta=now-frame->ts;
+				if(now>frame->waitting_ts||delta>max_frame_waitting){
 					DeliverFrame(frame);
 					PacketConsumed(frame);
 					UpdateDeliverTime(now);
@@ -337,10 +339,14 @@ void MultipathReceiver::DeliverToCache(uint8_t pid,sim_segment_t* d){
 	}
 	uint32_t now=rtc::TimeMillis();
 	packet->pid=pid;
-	packet->ts=now;
+	//packet->ts=now;
 	sim_segment_t *seg=&(packet->seg);
-	memcpy(seg,d,sizeof(sim_segment_t));
-	frame->ts=now;
+	memcpy(seg,d,sizeof(sim_segment_t));  
+    //if(frame->recv==0) 
+    {
+        frame->ts=now;
+    }
+	
 	frame->recv++;
 	frame->packets[index]=packet;
 	frame_cache_.insert(std::make_pair(fid,frame));

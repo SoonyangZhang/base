@@ -30,6 +30,7 @@ void Consume(uint32_t packet_id);
 void VideoRealAck(int hb,uint32_t seq);
 send_buf_t * GetSentPacketInfo(uint32_t seq);
 void RecvSegAck(sim_segment_ack_t*);
+void IncomingFeedBack(sim_feedback_t* feedback);
 void SenderUpdateBase(uint32_t);
 void RemoveAckedPacket(uint32_t seq);
 void RegisterSenderInterface(SenderInterface*s){ mpsender_=s;}

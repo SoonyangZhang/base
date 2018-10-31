@@ -266,6 +266,13 @@ void PathInfo::RecvSegAck(sim_segment_ack_t* ack){
 	}
 
 }
+void PathInfo::IncomingFeedBack(sim_feedback_t* feedback){
+	razor_sender_t *cc=NULL;
+	cc=GetController()->s_cc_;
+	if(cc){
+		cc->on_feedback(cc,feedback->feedback,feedback->feedback_size);
+	}
+}
 void PathInfo::SenderUpdateBase(uint32_t base_id){
     RemoveSentBufUntil(base_id);  
 }

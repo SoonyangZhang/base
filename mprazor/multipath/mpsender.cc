@@ -49,7 +49,7 @@ MultipathSender::~MultipathSender(){
 	}
 	NS_LOG_INFO("seg"<<std::to_string(seg_c_));
 }
-static uint32_t PING_INTERVAL=250;
+static uint32_t PING_INTERVAL=150;
 void MultipathSender::Process(){
     if(stop_){return ;}
 	if(!syn_path_.empty()){
@@ -258,11 +258,7 @@ void MultipathSender::SchedulePendingBuf(){
 }
 void MultipathSender::InnerProcessFeedback(uint8_t pid,sim_feedback_t* feedback){
 	PathInfo *path=GetPathInfo(pid);
-	razor_sender_t *cc=NULL;
-	cc=path->GetController()->s_cc_;
-	if(cc){
-		cc->on_feedback(cc,feedback->feedback,feedback->feedback_size);
-	}
+	path->IncomingFeedBack(feedback);
 }
 void MultipathSender::InnerProcessSegAck(uint8_t pid,sim_segment_ack_t* ack){
 	PathInfo *path=NULL;

@@ -10,7 +10,7 @@
 using namespace zsy;
 using namespace ns3;
 bool running=true;
-uint32_t run_time=100000;
+uint32_t run_time=200000;
 void signal_exit_handler(int sig)
 {
 	running=false;
@@ -79,7 +79,7 @@ int main(){
     su_set_addr(&remote1,"10.0.2.2",4321);
     su_set_addr(&local2,"10.0.3.1",1234);
     su_set_addr(&remote2,"10.0.4.2",4321);
-    session.Connect(4,local1,remote1,local2,remote2);
+    session.Connect(2,local1,remote1);//,local2,remote2);
     session.Start();
     uint32_t stop=rtc::TimeMillis()+run_time;
     bool can_send_video=false;

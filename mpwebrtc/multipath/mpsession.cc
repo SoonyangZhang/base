@@ -164,10 +164,10 @@ void MultipathSession::SendDisconMsg(){
 	uint32_t now=rtc::TimeMillis();
 	uint32_t wait_time=0;
 	if(sender_){
-		PathInfo *path=sender_->GetMinRttPath();
+		PathSender *path=sender_->GetMinRttPath();
 		if(path){
 			wait_time=path->rtt_+path->rtt_var_;
-			sender_->SendDisconnect(path,now);
+			path->SendDisconnect(now);
 			send_dis_c_++;
             sender_->Stop();
 			next_send_dis_ts_=now+send_dis_c_*wait_time;
@@ -278,9 +278,11 @@ void MultipathSession::ProcessingMsg(su_socket *fd,su_addr *remote,bin_stream_t 
 	case SIM_PONG:{
 		sim_pong_t pong;
 		sim_decode_msg(stream, &header, &pong);
-		//uint32_t rtt=rtc::TimeMillis(); //fuck.
-        uint32_t rtt=rtc::TimeMillis()-pong.ts;
-		ProcessPongMsg(pid,rtt);
+		uint32_t now=rtc::TimeMillis();
+		uint32_t rtt=now-pong.ts;
+		if(rtt>0){
+			ProcessPongMsg(pid,rtt,now);
+		}
         break;
 	}
 	case SIM_PING:{
@@ -357,12 +359,12 @@ void MultipathSession::ProcessingMsg(su_socket *fd,su_addr *remote,bin_stream_t 
     }
 	}
 }
-void MultipathSession::ProcessPongMsg(uint8_t pid,uint32_t rtt){
+void MultipathSession::ProcessPongMsg(uint8_t pid,uint32_t rtt,uint32_t now){
 	if(sender_){
-		sender_->ProcessPongMsg(pid,rtt);
+		sender_->ProcessPongMsg(pid,rtt,now);
 	}
 	if(receiver_){
-		receiver_->ProcessPongMsg(pid,rtt);
+		receiver_->ProcessPongMsg(pid,rtt,now);
 	}
 }
 void MultipathSession::PathStateForward(int type,int value){

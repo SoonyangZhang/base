@@ -1,5 +1,5 @@
 #include "mincostschedule.h"
-#include "path.h"
+#include "pathsender.h"
 namespace zsy{
 void MinCostSchedule::IncomingPackets(std::map<uint32_t,uint32_t>&packets){
 

@@ -43,7 +43,6 @@ public:
 	virtual ~SenderInterface(){}
 	virtual int64_t GetFirstTs()=0;
 	virtual uint32_t GetUid()=0;
-	virtual void Reclaim(sim_segment_t *seg)=0;
 	virtual PathSender* GetPathInfo(uint8_t)=0;
 	virtual void PacketSchedule(uint32_t,uint8_t)=0;
 	virtual void OnNetworkChanged(uint8_t pid,

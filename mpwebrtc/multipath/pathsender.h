@@ -111,7 +111,6 @@ private:
 	rtc::CriticalSection sent_buf_mutex_;
 	std::map<uint16_t,sim_segment_t*> retrans_buf_;
 	rtc::CriticalSection retrans_mutex_;
-	std::queue<send_buf_t*> free_buf_;
 	uint32_t last_sentbuf_collect_ts_;
 	uint32_t len_;//byte
 	webrtc::ProcessThread *pm_;

@@ -24,11 +24,6 @@ MultipathSender::MultipathSender(SessionInterface *session,uint32_t uid)
 ,stop_(false)
 ,max_free_buf_th_(50){
 	bin_stream_init(&strm_);
-	for(int i=0;i<40;i++){
-		sim_segment_t *seg=new sim_segment_t();
-		free_segs_.push(seg);
-		seg_c_++;
-	}
 	pm_=new webrtc::ProcessThreadImpl("mpsender");
 	pm_->Start();
 }
@@ -41,17 +36,10 @@ MultipathSender::~MultipathSender(){
 		auto it=pending_buf_.begin();
 		seg=it->second;
 		pending_buf_.erase(it);
-		free_segs_.push(seg);
-	}
-	while(!free_segs_.empty()){
-		seg=free_segs_.front();
-		free_segs_.pop();
-		seg_c_--;
 		delete seg;
 	}
 	pm_->Stop();
 	delete pm_;
-	NS_LOG_INFO("seg"<<std::to_string(seg_c_));
 }
 void MultipathSender::Process(){
     if(stop_){return ;}
@@ -94,6 +82,7 @@ void MultipathSender::Stop(){
 }
 void MultipathSender::Connect(su_socket *fd,su_addr *src,su_addr *dst){
 	PathSender *path=new PathSender(pm_,&clock_);
+    path->RegisterSenderInterface(this);
 	path->fd=*fd;
 	path->src=*src;
     path->dst=*dst;
@@ -173,7 +162,6 @@ void MultipathSender::ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t*h
 	}
 }
 void MultipathSender::AddAvailablePath(PathSender *path){
-	path->RegisterSenderInterface(this);
 	path->ConfigureCongestion();
     uint8_t pid=path->pid;
 	usable_path_.insert(std::make_pair(pid,path));
@@ -263,42 +251,13 @@ void MultipathSender::SendVideo(uint8_t payload_type,int ftype,void *data,uint32
 	pos = (uint8_t*)data;
 	std::list<sim_segment_t*> buf;
 	sim_segment_t *seg=NULL;
-	{
-		rtc::CritScope cs(&free_mutex_);
-		int new_buf=0;
-		int j=0;
-		if(free_segs_.size()<total){
-			if(free_segs_.size()==0){
-				new_buf=total;
-				for(j=0;j<new_buf;j++){
-					seg=new sim_segment_t();
-					buf.push_back(seg);
-					seg_c_++;
-				}
-			}else{
-				new_buf=total-free_segs_.size();
-				for(j=0;j<new_buf;j++){
-					seg=new sim_segment_t();
-					buf.push_back(seg);
-					seg_c_++;
-				}
-				while(!free_segs_.empty()){
-					seg=free_segs_.front();
-					free_segs_.pop();
-					buf.push_back(seg);
-				}
-			}
-		}else{
-			for(j=0;j<total;j++){
-				seg=free_segs_.front();
-				free_segs_.pop();
-				buf.push_back(seg);
-			}
-		}
+	int j=0;
+	for(j=0;j<total;j++){
+		seg=new sim_segment_t();
+		buf.push_back(seg);
 	}
-	//NS_LOG_INFO("buf_size"<<std::to_string(buf.size()));
 	{
-		i=0;
+		uint32_t i=0;
 		rtc::CritScope cs(&buf_mutex_);
 		while(!buf.empty()){
 				seg=buf.front();
@@ -323,7 +282,6 @@ void MultipathSender::SendVideo(uint8_t payload_type,int ftype,void *data,uint32
 			}
 	}
     frame_seed_++;
-	//SchedulePendingBuf();  pace queue is not thread safe, depress me quite a lot.
 }
 void MultipathSender::OnNetworkChanged(uint8_t pid,
 					  uint32_t bitrate_bps,
@@ -370,22 +328,5 @@ void  MultipathSender::SetSchedule(Schedule* s){
 void MultipathSender::SetRateControl(RateControl * c){
 	rate_control_=c;
 	rate_control_->SetSender(this);
-}
-void MultipathSender::Reclaim(sim_segment_t *seg){
-	rtc::CritScope cs(&free_mutex_);
-    memset(seg,0,sizeof(sim_segment_t));
-	free_segs_.push(seg);
-	uint32_t i=0;
-	uint32_t free=free_segs_.size();
-	//printf("free segs %d\n",free);
-	if(free>max_free_buf_th_){
-		sim_segment_t *temp=NULL;
-		for(i=0;i<free;i++){
-			temp=free_segs_.front();
-			free_segs_.pop();
-			seg_c_--;
-			delete temp;
-		}
-	}
 }
 }

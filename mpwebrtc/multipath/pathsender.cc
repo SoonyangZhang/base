@@ -27,6 +27,10 @@ PathSender::PathSender(webrtc::ProcessThread *pm,webrtc::Clock *clock)
 }
 PathSender::~PathSender(){
 	bin_stream_destroy(&strm_);
+	if(send_bucket_){
+		delete send_bucket_;
+	}
+
 }
 void PathSender::SendConnect(int cc,uint32_t now){
 	sim_header_t header;
@@ -101,6 +105,7 @@ bool PathSender::TimeToSendPacket(uint32_t ssrc,
 			cc->OnSentPacket(sentPacket);
 		}
 		UpdatePaceQueueDelay(seg->send_ts);
+		delete seg;
 	}
 	return true;
 }
@@ -125,12 +130,13 @@ void PathSender::ConfigureCongestion(){
 	webrtc::SendSideCongestionController * cc=NULL;
 	cc=new webrtc::SendSideCongestionController(clock_,this,
     		&null_log_,send_bucket_);
+	controller_=new CongestionController(cc,ROLE::ROLE_SENDER);
 	cc->SetBweBitrates(WEBRTC_MIN_BITRATE, kInitialBitrateBps, 5 * kInitialBitrateBps);
 	send_bucket_->SetEstimatedBitrate(kInitialBitrateBps);
     send_bucket_->SetProbingEnabled(false);
     pm_->RegisterModule(send_bucket_,RTC_FROM_HERE);
     pm_->RegisterModule(cc,RTC_FROM_HERE);
-    controller_=new CongestionController(cc,ROLE::ROLE_SENDER);
+
 }
 bool PathSender::put(sim_segment_t*seg){
 	if(stop_){
@@ -139,13 +145,6 @@ bool PathSender::put(sim_segment_t*seg){
 	seg->packet_id=packet_seed_;
 	seg->transport_seq=trans_seq_;
 	uint16_t id=trans_seq_;
-	{
-		 rtc::CritScope cs(&buf_mutex_);
-			auto it=buf_.find(id);
-			if(it!=buf_.end()){
-				return false;
-			}
-	}
 	len_+=(seg->data_size+SIM_SEGMENT_HEADER_SIZE);
 	{
 		rtc::CritScope cs(&buf_mutex_);
@@ -157,7 +156,7 @@ bool PathSender::put(sim_segment_t*seg){
 	uint32_t uid=mpsender_->GetUid();
 	if(cc){
 		send_bucket_->InsertPacket(webrtc::PacedSender::kNormalPriority,uid,
-				trans_seq_,now,seg->data_size + SIM_SEGMENT_HEADER_SIZE,false);
+				id,now,seg->data_size + SIM_SEGMENT_HEADER_SIZE,false);
 	}
 	packet_seed_++;
 	trans_seq_++;
@@ -165,7 +164,7 @@ bool PathSender::put(sim_segment_t*seg){
 }
 sim_segment_t *PathSender::get_segment(uint16_t seq,bool retrans,uint32_t ts){
 	sim_segment_t *seg=NULL;
-	send_buf_t *send_buf=NULL;
+	//send_buf_t *send_buf=NULL;
 	if(stop_){
 		return seg;
 	}
@@ -177,20 +176,18 @@ sim_segment_t *PathSender::get_segment(uint16_t seq,bool retrans,uint32_t ts){
 				seg=it->second;
 				len_-=(seg->data_size+SIM_SEGMENT_HEADER_SIZE);
 				buf_.erase(it);
-				send_buf=AllocateSentBuf();
-				send_buf->ts=ts;
-				send_buf->seg=seg;
+				//send_buf=AllocateSentBuf();
+				//send_buf->ts=ts;
+				//send_buf->seg=seg;
 			}
 		}
+		/*
 		if(send_buf){
-			//TODO the sent_buf_ may need lock
 			rtc::CritScope cs(&sent_buf_mutex_);
 			sent_buf_.push_back(send_buf);
-		}
-
+		}*/
 	}else{
 		//TODO  retrans
-		//rtc::CritScope cs(&retrans_mutex_);
 	}
     return seg;
 }
@@ -290,8 +287,8 @@ void  PathSender::RecvSegAck(sim_segment_ack_t* ack){
 	}
 	SenderUpdateBase(ack->base_packet_id);
 	RemoveAckedPacket(ack->acked_packet_id);
-	uint32_t minrtt=min_rtt_;
-	uint32_t i=0;
+	//uint32_t minrtt=min_rtt_;
+	//uint32_t i=0;
 	/*  TODO
 	for(i=0;i<ack->nack_num;i++){
 		uint32_t seq=ack->base_packet_id+ack->nack[i];
@@ -353,10 +350,7 @@ void PathSender::UpdatePaceQueueDelay(uint32_t ts){
 }
 send_buf_t *PathSender::AllocateSentBuf(){
 	send_buf_t *buf=NULL;
-	if(!free_buf_.empty()){
-		buf=free_buf_.front();
-		free_buf_.pop();
-	}else{
+	if(!buf){
 		buf=new send_buf_t();
 	}
 	return buf;
@@ -368,7 +362,7 @@ void PathSender::FreePendingBuf(){
 		seg=it->second;
 		buf_.erase(it++);
 		len_-=(seg->data_size+SIM_SEGMENT_HEADER_SIZE);
-	    mpsender_->Reclaim(seg);
+	    delete seg;
 	}
 }
 void PathSender::FreeSentBuf(){
@@ -380,16 +374,21 @@ void PathSender::FreeSentBuf(){
 		sent_buf_.pop_front();
 		seg=buf_ptr->seg;
 		buf_ptr->seg=NULL;
-		mpsender_->Reclaim(seg);
-		free_buf_.push(buf_ptr);
+		delete seg;
+		delete buf_ptr;
 	}
 }
 void  PathSender::RemoveAckedPacket(uint32_t seq){
 	send_buf_t *buf_ptr=NULL;
+	sim_segment_t *seg=NULL;
 	rtc::CritScope cs(&sent_buf_mutex_);
 	for(auto it=sent_buf_.begin();it!=sent_buf_.end();){
-		if((*it)->seg->packet_id==seq){
-			buf_ptr=(*it);
+		send_buf_t *temp=(*it);
+		if(temp->seg->packet_id>seq){
+			break;
+		}
+		if(temp->seg->packet_id==seq){
+			buf_ptr=temp;
 			sent_buf_.erase(it++);
             break;
 		}else{
@@ -397,10 +396,10 @@ void  PathSender::RemoveAckedPacket(uint32_t seq){
 		}
 	}
 	if(buf_ptr){
-		mpsender_->Reclaim(buf_ptr->seg);
+		seg=buf_ptr->seg;
 		buf_ptr->seg=NULL;
-		memset(buf_ptr,0,sizeof(send_buf_t));
-		free_buf_.push(buf_ptr);
+		delete seg;
+		delete buf_ptr;
 	}
 }
 void PathSender::RemoveSentBufUntil(uint32_t seq){
@@ -419,10 +418,9 @@ void PathSender::RemoveSentBufUntil(uint32_t seq){
 			break;
 		}
 		if(buf_ptr){
-			mpsender_->Reclaim(buf_ptr->seg);
-			buf_ptr->seg=NULL;
-			memset(buf_ptr,0,sizeof(send_buf_t));
-			free_buf_.push(buf_ptr);
+			sim_segment_t *seg=buf_ptr->seg;
+			delete seg;
+			delete buf_ptr;
 		}
 	}
 }
@@ -445,11 +443,9 @@ void PathSender::SentBufCollection(uint32_t now){
 				break;
 			}
 			else{
+				delete seg;
+				delete ptr;
 				sent_buf_.erase(it++);
-				mpsender_->Reclaim(seg);
-				ptr->seg=NULL;
-				memset(ptr,0,sizeof(send_buf_t));
-				free_buf_.push(ptr);
 			}
 		}
 	}

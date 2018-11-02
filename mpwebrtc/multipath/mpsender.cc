@@ -24,8 +24,8 @@ MultipathSender::MultipathSender(SessionInterface *session,uint32_t uid)
 ,stop_(false)
 ,max_free_buf_th_(50){
 	bin_stream_init(&strm_);
-	pm_=new webrtc::ProcessThreadImpl("mpsender");
-	pm_->Start();
+	//pm_=new webrtc::ProcessThreadImpl("mpsender");
+	//pm_->Start();
 }
 MultipathSender::~MultipathSender(){
 	bin_stream_destroy(&strm_);
@@ -38,8 +38,8 @@ MultipathSender::~MultipathSender(){
 		pending_buf_.erase(it);
 		delete seg;
 	}
-	pm_->Stop();
-	delete pm_;
+	//pm_->Stop();
+	//delete pm_;
 }
 void MultipathSender::Process(){
     if(stop_){return ;}
@@ -81,7 +81,7 @@ void MultipathSender::Stop(){
 	}
 }
 void MultipathSender::Connect(su_socket *fd,su_addr *src,su_addr *dst){
-	PathSender *path=new PathSender(pm_,&clock_);
+	PathSender *path=new PathSender(NULL,&clock_);
     path->RegisterSenderInterface(this);
 	path->fd=*fd;
 	path->src=*src;

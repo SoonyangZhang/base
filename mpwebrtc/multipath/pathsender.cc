@@ -1,4 +1,5 @@
 #include "pathsender.h"
+#include <string>
 namespace zsy{
 const uint32_t kInitialBitrateBps = 500000;
 PathSender::PathSender(webrtc::ProcessThread *pm,webrtc::Clock *clock)
@@ -22,7 +23,7 @@ PathSender::PathSender(webrtc::ProcessThread *pm,webrtc::Clock *clock)
 {
 	bin_stream_init(&strm_);
 	stop_=false;
-	pm_=pm;
+	pm_=NULL;
 	clock_=clock;
 }
 PathSender::~PathSender(){
@@ -30,7 +31,9 @@ PathSender::~PathSender(){
 	if(send_bucket_){
 		delete send_bucket_;
 	}
-
+    if(pm_){
+    delete pm_;
+    }
 }
 void PathSender::SendConnect(int cc,uint32_t now){
 	sim_header_t header;
@@ -126,6 +129,10 @@ void PathSender::ConfigureCongestion(){
 	if(controller_){
 		return;
 	}
+    if(!pm_){
+    std::string name=std::string("pathsender")+std::to_string(pid);
+    pm_=new webrtc::ProcessThreadImpl(name.c_str());
+    }
 	send_bucket_=(new webrtc::PacedSender(clock_, this, nullptr));
 	webrtc::SendSideCongestionController * cc=NULL;
 	cc=new webrtc::SendSideCongestionController(clock_,this,
@@ -136,7 +143,7 @@ void PathSender::ConfigureCongestion(){
     send_bucket_->SetProbingEnabled(false);
     pm_->RegisterModule(send_bucket_,RTC_FROM_HERE);
     pm_->RegisterModule(cc,RTC_FROM_HERE);
-
+    pm_->Start();
 }
 bool PathSender::put(sim_segment_t*seg){
 	if(stop_){
@@ -144,11 +151,12 @@ bool PathSender::put(sim_segment_t*seg){
 	}
 	seg->packet_id=packet_seed_;
 	seg->transport_seq=trans_seq_;
-	uint16_t id=trans_seq_;
+	uint16_t sequence_number=trans_seq_;
+    printf("size %d\n",seg->data_size);
 	len_+=(seg->data_size+SIM_SEGMENT_HEADER_SIZE);
 	{
 		rtc::CritScope cs(&buf_mutex_);
-		buf_.insert(std::make_pair(id,seg));
+		buf_.insert(std::make_pair(sequence_number,seg));
 	}
     uint32_t now=rtc::TimeMillis();
 	webrtc::SendSideCongestionController * cc=NULL;
@@ -156,7 +164,7 @@ bool PathSender::put(sim_segment_t*seg){
 	uint32_t uid=mpsender_->GetUid();
 	if(cc){
 		send_bucket_->InsertPacket(webrtc::PacedSender::kNormalPriority,uid,
-				id,now,seg->data_size + SIM_SEGMENT_HEADER_SIZE,false);
+				sequence_number,now,seg->data_size + SIM_SEGMENT_HEADER_SIZE,false);
 	}
 	packet_seed_++;
 	trans_seq_++;
@@ -236,6 +244,7 @@ void PathSender::UpdateRtt(uint32_t time,uint32_t now){
     if(controller_){
     	cc=controller_->s_cc_;
     }
+    printf("rtt %d",rtt_);
 	if(rtt_num_==0)
 	{
 		if(cc){
@@ -316,7 +325,7 @@ void  PathSender::IncomingFeedBack(sim_feedback_t* feedback){
 	std::unique_ptr<webrtc::rtcp::TransportFeedback> fb=
 	webrtc::rtcp::TransportFeedback::ParseFrom((uint8_t*)feedback->feedback, feedback->feedback_size);
 	if(cc){
-        printf("fb\n");
+        printf("fb %d\n",feedback->feedback_size);
 		cc->OnTransportFeedback(*fb.get());
 	}
 }
@@ -332,8 +341,10 @@ void PathSender::Stop(){
 	}
 	stop_=true;
     webrtc::SendSideCongestionController *cc=NULL;
+    pm_->DeRegisterModule(send_bucket_);
 	cc=controller_->s_cc_;
 	pm_->DeRegisterModule(cc);
+    pm_->Stop();
 	FreePendingBuf();
 	FreeSentBuf();
 }

@@ -1,6 +1,7 @@
 #include "pathreceiver.h"
 #include "rtc_base/location.h"
 #include "log.h"
+#include <string>
 namespace zsy{
 NS_LOG_COMPONENT_DEFINE("PathReceiver");
 PathReceiver::PathReceiver(webrtc::ProcessThread *pm,webrtc::Clock *clock)
@@ -19,12 +20,15 @@ PathReceiver::PathReceiver(webrtc::ProcessThread *pm,webrtc::Clock *clock)
 	bin_stream_init(&strm_);
     first_packet_=true;
 	stop_=false;
-	pm_=pm;
+	pm_=NULL;
 	clock_=clock;
     rbe_=NULL;
 }
 PathReceiver::~PathReceiver(){
 	bin_stream_destroy(&strm_);
+    if(pm_){
+    delete pm_;
+    }
 }
 void PathReceiver::HeartBeat(uint32_t now){
 	if((now-rtt_update_ts_)>PING_INTERVAL){
@@ -97,6 +101,11 @@ bool PathReceiver::SendTransportFeedback(webrtc::rtcp::TransportFeedback* packet
 		NS_LOG_ERROR("feedback size > SIM_FEEDBACK_SIZE");
 		return false;
 	}
+    std::unique_ptr<webrtc::rtcp::TransportFeedback> fb
+    =webrtc::rtcp::TransportFeedback::ParseFrom((uint8_t*)serialized.data(),serialized.size());
+	uint32_t media_ssrc=fb->media_ssrc();
+	uint32_t sender_ssrc=fb->sender_ssrc();
+    printf("fb %d %d %d\n",payload_size,media_ssrc,sender_ssrc);
 	INIT_SIM_HEADER(header, SIM_FEEDBACK, uid);
     header.ver=pid;
 	feedback.base_packet_id =base_seq_;
@@ -188,8 +197,8 @@ void PathReceiver::OnReceiveSegment(sim_header_t *header,sim_segment_t *seg){
     uint32_t min_seq=GetMinRecvSeq();
     uint32_t loss_size=GetLossTableSize();
     uint32_t delay=seg->send_ts;
-    printf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
-    		pid,seg->fid,seq,base_seq_,max_seq_,seg->ftype,min_seq,loss_size,delay);
+    //printf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+    //		pid,seg->fid,seq,base_seq_,max_seq_,seg->ftype,min_seq,loss_size,delay);
 }
 #define PATH_ACK_REAL_TIME	20
 #define PATH_ACK_HB_TIME		200
@@ -258,8 +267,16 @@ void PathReceiver::Stop(){
 		cc=controller_->r_cc_;
 		pm_->DeRegisterModule(cc);
 	}
+    pm_->Stop();
 }
 void PathReceiver::ConfigureCongestion(){
+    if(controller_){
+    return;
+    }
+    if(!pm_){
+    std::string name=std::string("pathreceiver")+std::to_string(pid);
+    pm_=new webrtc::ProcessThreadImpl(name.c_str());
+    }
 	webrtc::ReceiveSideCongestionController *cc=NULL;
 	cc=new webrtc::ReceiveSideCongestionController(
 						clock_,this);
@@ -267,6 +284,7 @@ void PathReceiver::ConfigureCongestion(){
     pm_->RegisterModule(rbe_,RTC_FROM_HERE);
 	pm_->RegisterModule(cc,RTC_FROM_HERE);
 	controller_=new CongestionController(cc,ROLE::ROLE_RECEIVER);
+    pm_->Start();
 }
 bool PathReceiver::LossTableSeqExist(uint32_t seq){
 	bool ret=false;

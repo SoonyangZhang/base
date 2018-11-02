@@ -21,8 +21,6 @@ stop_(false)
 		free_segs_.push(v_packet);
 		seg_c_++;
 	}
-	pm_=new webrtc::ProcessThreadImpl("mpreceiver");
-	pm_->Start();
 }
 MultipathReceiver::~MultipathReceiver(){
 	bin_stream_destroy(&strm_);
@@ -33,8 +31,6 @@ MultipathReceiver::~MultipathReceiver(){
 		seg_c_--;
 		delete v_packet;
 	}
-	pm_->Stop();
-	delete pm_;
 }
 bool MultipathReceiver::RegisterDataSink(NetworkDataConsumer* c){
     bool ret=false;
@@ -58,7 +54,7 @@ void MultipathReceiver::ProcessingMsg(su_socket *fd,su_addr *remote,sim_header_t
 		uint8_t pid=header->ver;
 		PathReceiver *path=GetPathInfo(pid);
 		if(!path){
-			path=new PathReceiver(pm_,&clock_);
+			path=new PathReceiver(NULL,&clock_);
 			path->pid=pid;
 			path->fd=*fd;
 			path->dst=*remote;

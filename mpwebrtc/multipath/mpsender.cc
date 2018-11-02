@@ -245,19 +245,19 @@ void MultipathSender::SendVideo(uint8_t payload_type,int ftype,void *data,uint32
 	}
 	timestamp=now-first_ts_;
 	uint8_t* pos;
-	uint16_t splits[MAX_SPLIT_NUMBER], total=0, i=0;
+	uint16_t splits[MAX_SPLIT_NUMBER], total=0;
 	assert((size / SIM_VIDEO_SIZE) < MAX_SPLIT_NUMBER);
 	total = FrameSplit(splits, size);
 	pos = (uint8_t*)data;
 	std::list<sim_segment_t*> buf;
 	sim_segment_t *seg=NULL;
-	int j=0;
-	for(j=0;j<total;j++){
+	uint32_t i=0;
+	for(i=0;i<total;i++){
 		seg=new sim_segment_t();
 		buf.push_back(seg);
 	}
 	{
-		uint32_t i=0;
+	    i=0;
 		rtc::CritScope cs(&buf_mutex_);
 		while(!buf.empty()){
 				seg=buf.front();

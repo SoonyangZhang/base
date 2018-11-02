@@ -325,6 +325,7 @@ void MultipathReceiver::DeliverToCache(uint8_t pid,sim_segment_t* d){
 void MultipathReceiver::ProcessPongMsg(uint8_t pid,uint32_t rtt,uint32_t now){
     if(stop_){return ;}
 	PathReceiver *path=GetPathInfo(pid);
+    printf("rtt %d\n",rtt);
 	path->UpdateRtt(rtt,now);
 }
 void MultipathReceiver::Process(){

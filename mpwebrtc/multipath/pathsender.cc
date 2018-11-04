@@ -102,6 +102,10 @@ bool PathSender::TimeToSendPacket(uint32_t ssrc,
 		header.ver=pid;
 		sim_encode_msg(&strm_, &header, seg);
 		SendToNetwork(strm_.data,strm_.used);
+        if(cc)
+        {
+            cc->AddPacket(uid,sequence_number,seg->data_size+SIM_SEGMENT_HEADER_SIZE,webrtc::PacedPacketInfo());
+        }
 		rtc::SentPacket sentPacket((int64_t)sequence_number,now);
 		if(cc)
 		{

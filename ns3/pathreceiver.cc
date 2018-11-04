@@ -176,6 +176,10 @@ void PathReceiver::OnReceiveSegment(sim_header_t *header,sim_segment_t *seg){
 	{
 		uint32_t now=rtc::TimeMillis();
 		uint32_t overhead=seg->data_size + SIM_SEGMENT_HEADER_SIZE;
+        if(overhead>1500)
+        {
+NS_LOG_INFO("overhead "<<overhead<<"seq"<<seg->transport_seq);
+        }      
 		webrtc::RTPHeader fakeHeader;
 		fakeHeader.ssrc=header->uid;
 		fakeHeader.extension.hasTransportSequenceNumber=true;
@@ -294,7 +298,7 @@ void PathReceiver::ConfigureCongestion(){
 	pm_=new ProcessModule();
 	webrtc::ReceiveSideCongestionController *cc=NULL;
 	cc=new webrtc::ReceiveSideCongestionController(
-						clock_,this);
+						&m_clock,this);
 	rbe_=cc->GetRemoteBitrateEstimator(true);
     pm_->RegisterModule(rbe_,RTC_FROM_HERE);
 	pm_->RegisterModule(cc,RTC_FROM_HERE);

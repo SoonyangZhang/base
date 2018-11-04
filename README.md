@@ -11,3 +11,6 @@ Thanks for the authors' contribution of these opensource project.
 
 In total, It seems that I write nothing.  
 
+The reason that it not work is that I forget add m_controller->AddPacket(m_uid,sequence_number,segment.data_size+header_len,webrtc::PacedPacketInfo());  at the pathsender file.
+
+

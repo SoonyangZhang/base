@@ -136,6 +136,9 @@ bool PathSender::TimeToSendPacket(uint32_t ssrc,
 		header.ver=pid;
 		sim_encode_msg(&strm_, &header, seg);
 		SendToNetwork(strm_.data,strm_.used);
+        if(cc){
+        cc->AddPacket(uid,sequence_number,seg->data_size+SIM_SEGMENT_HEADER_SIZE,webrtc::PacedPacketInfo());
+        }
 		rtc::SentPacket sentPacket((int64_t)sequence_number,now);
 		if(cc)
 		{
@@ -156,9 +159,9 @@ void PathSender::ConfigureCongestion(){
 		return;
 	}
     observer_=new ProxyObserver(mpsender_,pid);
-	send_bucket_=(new webrtc::PacedSender(clock_, this, nullptr));
+	send_bucket_=new webrtc::PacedSender(&m_clock, this, nullptr);
 	webrtc::SendSideCongestionController * cc=NULL;
-	cc=new webrtc::SendSideCongestionController(clock_,observer_,
+	cc=new webrtc::SendSideCongestionController(&m_clock,observer_,
     		&null_log_,send_bucket_);
 	controller_=new CongestionController(cc,ROLE::ROLE_SENDER);
 	cc->SetBweBitrates(WEBRTC_MIN_BITRATE, kInitialBitrateBps, 5 * kInitialBitrateBps);
@@ -290,6 +293,7 @@ void PathSender::UpdateRtt(uint32_t time,uint32_t now){
 	}
 	averageRtt=sum_rtt_/rtt_num_;
 	if(cc){
+        //NS_LOG_INFO("average "<<averageRtt<<"MAX "<<max_rtt_);
 		cc->OnRttUpdate(averageRtt,max_rtt_);
 	}
 }

@@ -21,6 +21,7 @@
 #include "ns3/event-id.h"
 #include "ns3/processmodule.h"
 #include "ns3/mpvideoheader.h"
+#include "ns3/simulationclock.h"
 namespace ns3{
 class PathReceiver :public webrtc::PacketRouter
 ,public Application{
@@ -108,6 +109,7 @@ private:
 	bin_stream_t	strm_;
 	ProcessModule *pm_;
 	webrtc::Clock *clock_;
+    SimulationClock m_clock;
     webrtc::RemoteBitrateEstimator *rbe_;
     EventId pingTimer_;
 };

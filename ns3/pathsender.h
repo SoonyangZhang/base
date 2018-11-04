@@ -26,6 +26,7 @@
 #include "ns3/processmodule.h"
 #include "ns3/proxyobserver.h"
 #include "ns3/mpvideoheader.h"
+#include "ns3/simulationclock.h"
 namespace ns3{
 class PathSender:public webrtc::PacedSender::PacketSender,
 public Application{
@@ -125,6 +126,7 @@ private:
     EventId pingTimer_;
     EventId rxTimer_;
     EventId gcTimer_;
+    SimulationClock m_clock;
 };
 }
 

@@ -3,7 +3,7 @@
 #include <map>
 #include<queue>
 #include "rtc_base/criticalsection.h"
-#include "modules/utility/source/process_thread_impl.h"
+//#include "modules/utility/source/process_thread_impl.h"
 #include "sessioninterface.h"
 #include "pathreceiver.h"
 #include "emulationclock.h"
@@ -59,7 +59,7 @@ private:
 	uint32_t last_deliver_ts_;
 	uint32_t min_fid_;//record the fid that has deliverd to uplayer;
 	EmulationClock clock_;
-	webrtc::ProcessThreadImpl *pm_;
+	//webrtc::ProcessThreadImpl *pm_;
 };
 }
 #endif /* SIM_TRANSPORT_MPRECEIVER_H_ */

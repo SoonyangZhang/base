@@ -4,7 +4,6 @@
 #include <map>
 #include <queue>
 #include "rtc_base/criticalsection.h"
-#include "modules/utility/source/process_thread_impl.h"
 #include "sessioninterface.h"
 #include "schedule.h"
 #include "ratecontrol.h"
@@ -71,7 +70,7 @@ private:
 	bool stop_;
 	uint32_t max_free_buf_th_;
 	EmulationClock clock_;
-	webrtc::ProcessThreadImpl *pm_;
+	//webrtc::ProcessThreadImpl *pm_;
 };
 }
 

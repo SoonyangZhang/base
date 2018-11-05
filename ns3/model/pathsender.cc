@@ -42,7 +42,6 @@ PathSender::PathSender()
 	first_packet_=false;
 	pm_=new ProcessModule();
 	clock_=NULL;
-    observer_=NULL;
 }
 PathSender::~PathSender(){
 	bin_stream_destroy(&strm_);
@@ -50,9 +49,6 @@ PathSender::~PathSender(){
 		delete send_bucket_;
 	}
 	delete pm_;
-    if(observer_){
-        delete observer_;
-    }
 }
 void PathSender::SetClock(webrtc::Clock *clock){
 	clock_=clock;
@@ -149,6 +145,15 @@ bool PathSender::TimeToSendPacket(uint32_t ssrc,
 	}
 	return true;
 }
+void PathSender::OnNetworkChanged(uint32_t bitrate_bps,
+        uint8_t fraction_loss,  // 0 - 255.
+        int64_t rtt_ms,
+        int64_t probing_interval_ms){
+    rate_=bitrate_bps;
+	if(mpsender_){
+		mpsender_->OnNetworkChanged(pid,bitrate_bps,fraction_loss,rtt_ms);
+	}
+}
 size_t PathSender::TimeToSendPadding(size_t bytes,
 	                                 const webrtc::PacedPacketInfo& cluster_info){
 	printf("padding not implement");
@@ -158,10 +163,9 @@ void PathSender::ConfigureCongestion(){
 	if(controller_){
 		return;
 	}
-    observer_=new ProxyObserver(mpsender_,pid);
 	send_bucket_=new webrtc::PacedSender(&m_clock, this, nullptr);
 	webrtc::SendSideCongestionController * cc=NULL;
-	cc=new webrtc::SendSideCongestionController(&m_clock,observer_,
+	cc=new webrtc::SendSideCongestionController(&m_clock,this,
     		&null_log_,send_bucket_);
 	controller_=new CongestionController(cc,ROLE::ROLE_SENDER);
 	cc->SetBweBitrates(WEBRTC_MIN_BITRATE, kInitialBitrateBps, 5 * kInitialBitrateBps);

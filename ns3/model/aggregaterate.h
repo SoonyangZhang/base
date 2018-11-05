@@ -2,11 +2,13 @@
 #define MULTIPATH_AGGREGATERATE_H_
 #include "ratecontrol.h"
 #include <map>
+#include <iostream>
+#include <fstream>
 namespace ns3{
 class AggregateRate:public RateControl{
 public:
 	AggregateRate();
-	~AggregateRate(){}
+	~AggregateRate();
 	void RegisterRateChangeCallback(RateChangeCallback*);
 	void ChangeRate(uint8_t pid,uint32_t bitrate
 			, uint8_t fraction_loss, uint32_t rtt) override;
@@ -15,8 +17,10 @@ private:
 	std::map<uint8_t,uint32_t> path_rate_table_;
 	RateChangeCallback *cb_;
 	SenderInterface *sender_;
-    uint32_t first_ts_;
+    double first_ts_;
+    bool first_;
     uint8_t a_pid_{10};
+    std::fstream m_traceRateFile;
 };
 }
 

@@ -1,0 +1,44 @@
+## -*- Mode: python; py-indent-offset: 4; indent-tabs-mode: nil; coding: utf-8; -*-
+
+def build(bld):
+    mpvideo= bld.create_ns3_module('mp-video', ['core','network','internet'])
+    mpvideo.source = [
+    'model/cf_stream.c',
+    'model/sim_proto.c',
+    'model/cf_crc32.c',
+    'model/posix.c',
+    'model/pathsender.cc',
+    'model/mpsender.cc',
+    'model/pathreceiver.cc',
+    'model/mpreceiver.cc',
+    'model/roundrobinschedule.cc',
+    'model/aggregaterate.cc',
+    'model/fakevideogenerator.cc',
+    'model/fakevideoconsumer.cc',
+    'model/mpvideoheader.cc',
+    'model/scaleschedule.cc',
+	]
+    headers = bld(features='ns3header')
+    headers.module = 'mp-video'
+    headers.source = [
+    'model/cf_platform.h',
+    'model/cf_stream.h',
+    'model/sim_proto.h',
+    'model/pathcommon.h',
+    'model/schedule.h',
+    'model/ratecontrol.h',
+    'model/pathsender.h',
+    'model/mpsender.h',
+    'model/pathreceiver.h',
+    'model/mpreceiver.h',
+    'model/mpcommon.h',
+    'model/sessioninterface.h',
+    'model/roundrobinschedule.h', 
+    'model/aggregaterate.h',
+    'model/videosource.h',
+    'model/fakevideogenerator.h',
+    'model/fakevideoconsumer.h',
+    'model/mpvideoheader.h',
+    'model/scaleschedule.h',
+	]
+    mpvideo.env.append_value("CFLAGS","-fPIC")

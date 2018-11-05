@@ -2,6 +2,7 @@
 #define MULTIPATH_FAKEVIDEOGENERATOR_H_
 #include "aggregaterate.h"
 #include "roundrobinschedule.h"
+#include "scaleschedule.h"
 #include "mpcommon.h"
 #include "videosource.h"
 #include"ns3/event-id.h"
@@ -29,7 +30,8 @@ private:
 	bool running_;
 	SenderInterface *sender_;
 	AggregateRate ratecontrol_;
-	RoundRobinSchedule schedule_;
+	//RoundRobinSchedule schedule_;
+    ScaleSchedule schedule_;
 	EventId m_timer;
 };
 }

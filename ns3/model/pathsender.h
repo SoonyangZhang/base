@@ -27,8 +27,10 @@
 #include "ns3/proxyobserver.h"
 #include "ns3/mpvideoheader.h"
 #include "ns3/simulationclock.h"
+#include "modules/congestion_controller/include/send_side_congestion_controller.h"
 namespace ns3{
 class PathSender:public webrtc::PacedSender::PacketSender,
+public webrtc::SendSideCongestionController::Observer,
 public Application{
 public:
 	PathSender();
@@ -42,7 +44,10 @@ public:
 	                              const webrtc::PacedPacketInfo& cluster_info) override;
 	virtual size_t TimeToSendPadding(size_t bytes,
 	                                 const webrtc::PacedPacketInfo& cluster_info) override;
-
+	void OnNetworkChanged(uint32_t bitrate_bps,
+	                      uint8_t fraction_loss,  // 0 - 255.
+	                      int64_t rtt_ms,
+	                      int64_t probing_interval_ms) override;
 	void ConfigureCongestion();
 
 	bool put(sim_segment_t*seg);
@@ -118,7 +123,6 @@ private:
 	rtc::CriticalSection retrans_mutex_;
 	uint32_t last_sentbuf_collect_ts_;
 	uint32_t len_;//byte
-    ProxyObserver *observer_;
 	ProcessModule *pm_;
 	webrtc::Clock *clock_;
 	webrtc::PacedSender *send_bucket_;

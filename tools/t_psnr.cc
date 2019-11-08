@@ -27,7 +27,7 @@ int main(int argc, char **argv)
     std::string format=a.get<string>("format");
     std::string result=a.get<string>("output");
     FILE *f1=nullptr, *f2=nullptr,*f3=nullptr;
-    int ssim = 0,yuv,inc = 1, Y, F;
+    int yuv,inc = 1, Y, F;
     double ypsnr = 0.0,yssim=0.0;
     unsigned char *b1=nullptr, *b2=nullptr;
     int frameCount=0;

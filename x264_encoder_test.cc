@@ -64,11 +64,6 @@ int main(int argc, char **argv){
 			perror("write encoded data failed");
 			break;
 		}
-		if(counter==100)
-		{
-		//printf("change bitrate\n");
-		//encoder.set_bitrate(200);
-		}
 		counter++;
 	}
 	std::cout<<"frames "<<counter<<std::endl;
